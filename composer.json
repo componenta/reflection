@@ -1,0 +1,21 @@
+{
+    "name": "componenta/reflection",
+    "description": "Reflection helpers for Componenta",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "componenta/arrayable": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Componenta\\Reflection\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Componenta\\Reflection\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "stable"
+}
