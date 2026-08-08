@@ -191,9 +191,9 @@ final class Reflection
             return self::$reflectors["$objectOrClass::$method"] = new ReflectionMethod($objectOrClass, $method);
         }
 
-        $cacheKey = spl_object_hash($callable);
+        $cacheKey = $callable::class . '::__invoke';
         if (isset(self::$reflectors[$cacheKey])) return self::$reflectors[$cacheKey];
-        return self::$reflectors[$callable::class] = new ReflectionMethod($callable, '__invoke');
+        return self::$reflectors[$cacheKey] = new ReflectionMethod($callable, '__invoke');
     }
 
     /**

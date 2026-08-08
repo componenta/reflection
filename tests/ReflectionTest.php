@@ -221,6 +221,19 @@ final class ReflectionTest extends TestCase
         $this->assertSame('__invoke', $result->getName());
     }
 
+    public function testCallableForInvokableObjectDoesNotPoisonClassReflection(): void
+    {
+        $invokable = new InvokableClass();
+
+        $callableReflection = Reflection::callable($invokable);
+        $classReflection = Reflection::class(InvokableClass::class);
+
+        $this->assertInstanceOf(ReflectionMethod::class, $callableReflection);
+        $this->assertInstanceOf(ReflectionClass::class, $classReflection);
+        $this->assertSame(InvokableClass::class, $classReflection->getName());
+        $this->assertSame($callableReflection, Reflection::callable($invokable));
+    }
+
     public function testObjectReturnsReflectionObject(): void
     {
         $object = new PlainClass();
