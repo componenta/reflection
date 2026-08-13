@@ -4,19 +4,9 @@ Small reflection helpers for Componenta libraries and PHP 8.4+ applications.
 
 ## Installation
 
-This README documents the **unreleased v2 API currently on `main`**. The latest published stable release is still v1.x, so install the development branch explicitly when testing the API documented below:
-
 ```bash
-composer require componenta/reflection:dev-main
+composer require componenta/reflection:^2.0
 ```
-
-For the latest published v1 release instead:
-
-```bash
-composer require componenta/reflection:^1.0
-```
-
-The v1 API differs from the API documented on this branch.
 
 ## Requirements
 
