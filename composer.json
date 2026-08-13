@@ -19,10 +19,7 @@
     "autoload-dev": {
         "psr-4": {
             "Componenta\\Reflection\\Tests\\": "tests/"
-        },
-        "files": [
-            "tests/PestSupport.php"
-        ]
+        }
     },
     "scripts": {
         "test": "@php vendor/bin/pest",
