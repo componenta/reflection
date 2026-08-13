@@ -8,7 +8,6 @@ use Closure;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionClassConstant;
-use ReflectionException;
 use ReflectionFunction;
 use ReflectionFunctionAbstract;
 use ReflectionMethod;
@@ -199,12 +198,16 @@ final class Reflection
             return self::$classes[$key];
         }
 
-        try {
-            /** @var class-string $class */
-            return self::$classes[$key] = new ReflectionClass($class);
-        } catch (ReflectionException) {
+        if (!class_exists($class)
+            && !interface_exists($class)
+            && !trait_exists($class)
+            && !enum_exists($class)
+        ) {
             return null;
         }
+
+        /** @var class-string $class */
+        return self::$classes[$key] = new ReflectionClass($class);
     }
 
     /**
@@ -389,6 +392,7 @@ final class Reflection
     /**
      * @template T of object
      * @param array<string, list<T>> $result
+     * @param-out array<string, list<T>> $result
      * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
      * @param class-string<T>|null $name
      */
@@ -399,7 +403,7 @@ final class Reflection
         ?string $name,
     ): void {
         $metadata = self::getMetadata($reflector, $name);
-        if ($metada !== null) {
+        if ($metadata !== null) {
             $result[$path] = $metadata;
         }
     }
