@@ -1,30 +1,14 @@
 # Componenta Reflection
 
-Небольшой набор reflection-утилит для библиотек Componenta и приложений на PHP 8.4+.
+Утилиты Reflection для PHP 8.4+.
 
 ## Установка
 
-Этот README описывает **ещё не выпущенный API v2, который сейчас находится в `main`**. Последний опубликованный стабильный релиз пока относится к v1.x, поэтому для проверки API, описанного ниже, development-ветку нужно указать явно:
-
 ```bash
-composer require componenta/reflection:dev-main
+composer require componenta/reflection:^2.0
 ```
 
-Для установки последнего опубликованного релиза v1 используйте:
-
-```bash
-composer require componenta/reflection:^1.0
-```
-
-API v1 отличается от API, описанного в README ветки `main`.
-
-## Требования
-
-- PHP 8.4+
-
-## Reflection значений
-
-`Reflection` раздельно кеширует reflectors классов, функций и методов. Reflectors объектов и closures хранятся в `WeakMap`, поэтому кеш не продлевает жизнь объектам приложения в долгоживущих workers.
+## Reflection
 
 ```php
 use Componenta\Reflection\Reflection;
@@ -35,47 +19,45 @@ $closure = Reflection::callable(static fn (): string => 'ok');
 $method = Reflection::callable([App\Service\UserService::class, 'handle']);
 ```
 
-`Reflection::reflect()` принимает mixed input и возвращает соответствующий native reflector либо `null`, если значение нельзя корректно отразить.
+`Reflection::class()` поддерживает классы, интерфейсы, трейты и enum и возвращает `null`, если символ не существует.
 
-`Reflection::callable()` отражает конкретные functions, methods и invokable objects. PHP-callable, существующий только за счёт `__call()` или `__callStatic()`, не имеет конкретного method declaration с достоверной сигнатурой; поэтому `Reflection::callable()` отклоняет такой случай через `InvalidArgumentException`, а универсальный `Reflection::reflect()` возвращает `null`.
+`Reflection::callable()` поддерживает функции, closures, конкретные методы и invokable-объекты. Callable, доступные только через `__call()` или `__callStatic()`, отклоняются, поскольку у них нет конкретной сигнатуры метода для Reflection.
 
-`Reflection::class()` поддерживает classes, interfaces, traits и enums. Для отсутствующего class-like symbol возвращается `null`. При отрицательном lookup autoloader вызывается один раз; исключения из autoloader не подавляются.
+`Reflection::reflect()` принимает mixed и возвращает соответствующий native reflector либо `null`, если значение нельзя надёжно отразить.
 
-## Чтение attributes
+## Атрибуты
 
 ```php
 $class = Reflection::class(App\Command\CreatePostCommand::class);
 
-$policies = Reflection::getMetadata($class, PermissionPolicy::class);
-$policy = Reflection::getFirstMetadata($class, PermissionPolicy::class);
-$hasPolicy = Reflection::hasMetadata($class, PermissionPolicy::class);
+$attributes = Reflection::getMetadata($class, PermissionPolicy::class);
+$first = Reflection::getFirstMetadata($class, PermissionPolicy::class);
+$has = Reflection::hasMetadata($class, PermissionPolicy::class);
 ```
 
-`getMetadata()` возвращает `list<object>|null`. Кешируются definitions attributes, но их экземпляры создаются заново при каждом чтении. `hasMetadata()` и `hasDeepMetadata()` проверяют только definitions и не вызывают constructors attributes.
+Кешируются определения атрибутов, а их экземпляры создаются заново при каждом чтении. `hasMetadata()` не создаёт экземпляры атрибутов.
 
-Поддерживаются functions/methods, classes, parameters, properties, `ReflectionClassConstant` и `ReflectionConstant`. Attributes глобальных constants и `ReflectionConstant::getAttributes()` доступны начиная с PHP 8.5; на PHP 8.4 `ReflectionConstant` безопасно ведёт себя как reflector без attributes.
+Поддерживаются функции, методы, классы, параметры, свойства, константы классов и глобальные константы. Атрибуты глобальных констант доступны на PHP 8.5+.
 
-## Deep attribute lookup
-
-Deep lookup учитывает class attributes, methods, properties, PHP 8.4 property hooks и class constants.
+### Глубокий поиск
 
 ```php
 $attributes = Reflection::getDeepMetadata($class, SomeAttribute::class);
-
-foreach ($attributes as $path => $items) {
-    // App\Command\CreatePostCommand
-    // App\Command\CreatePostCommand::handle()
-    // App\Command\CreatePostCommand::$title
-    // App\Command\CreatePostCommand::$title::get()
-    // App\Command\CreatePostCommand::STATUS
-}
 ```
 
-У method path присутствуют `()`, поэтому method и class constant с одинаковым именем не могут перезаписать друг друга.
+Глубокий поиск включает класс, методы, свойства, property hooks и константы класса. Пути однозначны:
+
+```text
+App\Command\CreatePostCommand
+App\Command\CreatePostCommand::handle()
+App\Command\CreatePostCommand::$title
+App\Command\CreatePostCommand::$title::get()
+App\Command\CreatePostCommand::STATUS
+```
+
+`getFirstDeepMetadata()` возвращает первый найденный атрибут, а `hasDeepMetadata()` проверяет наличие атрибута без создания его экземпляра.
 
 ## Reflection типов
-
-`ReflectionType` поддерживает named, union, intersection и DNF types.
 
 ```php
 use Componenta\Reflection\ReflectionType;
@@ -87,24 +69,22 @@ ReflectionType::contains($type, SomeInterface::class);
 ReflectionType::getTypeNames($type);
 ```
 
-`ReflectionParameter::getType()` может вернуть `null`, поэтому `getTypeNames(null)` возвращает пустой список. Nullable named declarations нормализуются семантически: например, `?int` даёт `['int', 'null']`, поэтому `contains($type, 'null')` согласован с nullable unions. Для `mixed` результат остаётся `['mixed']`, поскольку `mixed` уже включает `null` по смыслу.
+`ReflectionType` поддерживает named, union, intersection и DNF-типы.
 
-`toString()` требует настоящий `ReflectionType` и возвращает его native строковое представление PHP.
+`getTypeNames(null)` возвращает `[]`. Nullable named-типы нормализуются семантически: `?int` даёт `['int', 'null']`.
 
-Native Reflection по-разному представляет некоторые relative type names в PHP 8.4 и 8.5. Если тип всё ещё возвращается как `self`, `parent` или `static`, передавайте явный `scope`. Для обычных class declarations `self` и `parent` обычно разрешаются относительно declaring class; для `static` передавайте фактический late-static class, когда это различие существенно.
+Если native Reflection возвращает `self`, `parent` или `static`, передайте declaring/effective class через `scope`:
 
 ```php
 ReflectionType::match($type, $value, scope: $declaringClass);
 ReflectionType::getTypeNames($type, scope: $declaringClass);
 ```
 
-Сам trait не является корректным scope для relative type: `self`, `parent` и `static` внутри trait интерпретируются в consuming class. Отражайте метод через consuming class и передавайте этот class как `scope`; иначе helper завершится fail-fast вместо ошибочного разрешения relative type в имя trait.
+Для relative types, объявленных в trait, в качестве `scope` используется consuming class.
 
-Если native Reflection уже возвращает конкретное имя класса, `scope` для него не нужен.
+`ReflectionType::toString()` возвращает native строковое представление типа PHP.
 
-### Простое PHP-level coercion
-
-`canCoerce()` и `coerce()` намеренно остаются в пакете. Они выполняют консервативные явные преобразования к отражённым **native PHP types**. Это не замена `componenta/caster`: caster отвечает за именованные и доменно-специфичные pipelines преобразования.
+### Coercion
 
 ```php
 if (ReflectionType::canCoerce($type, $value)) {
@@ -112,9 +92,9 @@ if (ReflectionType::canCoerce($type, $value)) {
 }
 ```
 
-Контракт строгий: если `canCoerce()` вернул `false`, `coerce()` отклонит то же преобразование. Для union coercion сохраняется уже подходящий branch, а преобразование выполняется только если возможен ровно один target. Если подходят несколько targets, преобразование отклоняется вместо применения внутреннего порядка предпочтений weak scalar coercion PHP.
+Coercion ограничен отражёнными PHP-типами. Union преобразуется только когда значение уже соответствует одной ветке или преобразуема ровно одна ветка; неоднозначные преобразования отклоняются.
 
-В array можно преобразовать array, iterable и `Componenta\Arrayable\Arrayable`. Произвольные scalars больше не оборачиваются молча в одноэлементный array.
+Array можно получить из array, iterable и `Componenta\Arrayable\Arrayable`. Scalars не оборачиваются в одноэлементный array.
 
 ## Управление кешем
 
@@ -122,7 +102,7 @@ if (ReflectionType::canCoerce($type, $value)) {
 Reflection::clearReflectors();
 ```
 
-Метод очищает кеши classes/functions/methods и сбрасывает weak caches объектов, closures и definitions attributes. Основной сценарий — изоляция тестов.
+Reflectors классов, функций и методов кешируются сильно. Reflectors объектов и closures хранятся в `WeakMap` и не продлевают время жизни объектов приложения.
 
 ## Разработка
 
@@ -130,4 +110,4 @@ Reflection::clearReflectors();
 composer check
 ```
 
-Тесты написаны на Pest 4. Статический анализ выполняется PHPStan на максимальном уровне. CI проверяет PHP 8.4 и 8.5, включая отдельный PHP 8.5-only smoke test для attributed global constants.
+Тесты используют Pest 4. Статический анализ выполняется PHPStan на максимальном уровне. CI проверяет PHP 8.4 и PHP 8.5.
