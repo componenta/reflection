@@ -71,20 +71,12 @@ final class ReflectionType
         return self::coerceType($type, $value, self::normalizeScope($scope));
     }
 
-    /**
-     * Returns PHP's canonical string representation of a reflected type.
-     */
     public static function toString(NativeReflectionType $type): string
     {
         return (string) $type;
     }
 
     /**
-     * Returns every named type contained in a named, union, intersection or DNF type.
-     *
-     * Relative names are returned literally unless $scope is supplied, in which case
-     * self, parent and static are resolved to class names.
-     *
      * @param ReflectionClass<object>|class-string|null $scope
      * @return list<string>
      */
@@ -98,11 +90,7 @@ final class ReflectionType
         return array_values(array_unique($names));
     }
 
-    /**
-     * Checks whether a reflected type contains a named type, including inside DNF types.
-     *
-     * @param ReflectionClass<object>|class-string|null $scope
-     */
+    /** @param ReflectionClass<object>|class-string|null $scope */
     public static function contains(
         ?NativeReflectionType $type,
         string $typeName,
@@ -358,7 +346,23 @@ final class ReflectionType
             ));
         }
 
-        return (int) $value;
+        if (is_int($value)) {
+            return $value;
+        }
+
+        if (is_float($value)) {
+            return (int) $value;
+        }
+
+        if (is_bool($value)) {
+            return (int) $value;
+        }
+
+        if (is_string($value)) {
+            return (int) $value;
+        }
+
+        throw new \LogicException('Integer coercion invariant was violated.');
     }
 
     private static function canCoerceToInt(mixed $value): bool
@@ -400,10 +404,6 @@ final class ReflectionType
             && !($value < 0 && $converted > 0);
     }
 
-    /**
-     * Returns null when the numeric string is not an integer literal, otherwise
-     * whether that integer literal fits the current platform integer range.
-     */
     private static function integerStringFitsInt(string $value): ?bool
     {
         $value = trim($value);
