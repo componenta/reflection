@@ -27,3 +27,5 @@ jobs:
       - run: composer audit
       - run: composer check-platform-reqs
       - run: composer check
+      - if: matrix.php == '8.5'
+        run: php .github/php85-global-constant-metadata.php
