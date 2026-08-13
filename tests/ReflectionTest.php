@@ -5,570 +5,237 @@ declare(strict_types=1);
 namespace Componenta\Reflection\Tests;
 
 use Attribute;
-use PHPUnit\Framework\TestCase;
+use Componenta\Reflection\Reflection;
 use ReflectionClass;
 use ReflectionFunction;
 use ReflectionMethod;
 use ReflectionObject;
-use Componenta\Reflection\Reflection;
-
-final class ReflectionTest extends TestCase
-{
-    protected function setUp(): void
-    {
-        Reflection::clearReflectors();
-    }
-
-    public function testAddReflectorStoresReflectorInCache(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-        Reflection::addReflector(PlainClass::class, $reflector);
-
-        $result = Reflection::class(PlainClass::class);
-
-        $this->assertSame($reflector, $result);
-    }
-
-    public function testClearReflectorsRemovesAllCachedReflectors(): void
-    {
-        $first = Reflection::class(PlainClass::class);
-
-        Reflection::clearReflectors();
-
-        $second = Reflection::class(PlainClass::class);
-
-        $this->assertNotSame($first, $second);
-    }
-
-    public function testGetMetadataReturnsAllAttributesWhenNoFilterProvided(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $metadata = Reflection::getMetadata($reflector);
-
-        $this->assertIsArray($metadata);
-        $this->assertCount(2, $metadata);
-        $this->assertInstanceOf(TestAttribute::class, $metadata[0]);
-        $this->assertInstanceOf(AnotherAttribute::class, $metadata[1]);
-    }
-
-    public function testGetMetadataReturnsFilteredAttributesWhenNameProvided(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $metadata = Reflection::getMetadata($reflector, TestAttribute::class);
-
-        $this->assertIsArray($metadata);
-        $this->assertCount(1, $metadata);
-        $this->assertInstanceOf(TestAttribute::class, $metadata[0]);
-        $this->assertSame('class-level', $metadata[0]->value);
-    }
-
-    public function testGetMetadataReturnsNullWhenNoAttributesFound(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-
-        $metadata = Reflection::getMetadata($reflector);
-
-        $this->assertNull($metadata);
-    }
-
-    public function testGetMetadataReturnsNullWhenFilteredAttributeNotFound(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-
-        $metadata = Reflection::getMetadata($reflector, TestAttribute::class);
-
-        $this->assertNull($metadata);
-    }
-
-    public function testGetFirstMetadataReturnsFirstMatchingAttribute(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $attribute = Reflection::getFirstMetadata($reflector, TestAttribute::class);
-
-        $this->assertInstanceOf(TestAttribute::class, $attribute);
-        $this->assertSame('class-level', $attribute->value);
-    }
-
-    public function testGetFirstMetadataReturnsNullWhenAttributeNotFound(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-
-        $attribute = Reflection::getFirstMetadata($reflector, TestAttribute::class);
-
-        $this->assertNull($attribute);
-    }
-
-    public function testHasMetadataReturnsTrueWhenAttributeExists(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $result = Reflection::hasMetadata($reflector, TestAttribute::class);
-
-        $this->assertTrue($result);
-    }
-
-    public function testHasMetadataReturnsFalseWhenAttributeDoesNotExist(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-
-        $result = Reflection::hasMetadata($reflector, TestAttribute::class);
-
-        $this->assertFalse($result);
-    }
-
-    public function testReflectReturnsReflectionFunctionForClosure(): void
-    {
-        $closure = fn() => 'test';
-
-        $result = Reflection::reflect($closure);
-
-        $this->assertInstanceOf(ReflectionFunction::class, $result);
-    }
-
-    public function testReflectReturnsReflectionObjectForObject(): void
-    {
-        $object = new PlainClass();
-
-        $result = Reflection::reflect($object);
-
-        $this->assertInstanceOf(ReflectionObject::class, $result);
-    }
-
-    public function testReflectReturnsReflectionClassForClassName(): void
-    {
-        $result = Reflection::reflect(PlainClass::class);
-
-        $this->assertInstanceOf(ReflectionClass::class, $result);
-    }
-
-    public function testReflectReturnsNullForNonExistentClass(): void
-    {
-        $result = Reflection::reflect('NonExistentClass');
-
-        $this->assertNull($result);
-    }
-
-    public function testReflectReturnsNullForUnsupportedType(): void
-    {
-        $result = Reflection::reflect(123);
-
-        $this->assertNull($result);
-    }
-
-    public function testCallableReturnsReflectionFunctionForClosure(): void
-    {
-        $closure = fn() => null;
-
-        $result = Reflection::callable($closure);
-
-        $this->assertInstanceOf(ReflectionFunction::class, $result);
-    }
-
-    public function testCallableCachesClosureReflection(): void
-    {
-        $closure = fn() => null;
-
-        $first = Reflection::callable($closure);
-        $second = Reflection::callable($closure);
-
-        $this->assertSame($first, $second);
-    }
-
-    public function testCallableReturnsReflectionFunctionForNamedFunction(): void
-    {
-        $result = Reflection::callable('array_map');
-
-        $this->assertInstanceOf(ReflectionFunction::class, $result);
-        $this->assertSame('array_map', $result->getName());
-    }
-
-    public function testCallableReturnsReflectionMethodForStaticMethodString(): void
-    {
-        $result = Reflection::callable(AnnotatedClass::class . '::staticMethod');
-
-        $this->assertInstanceOf(ReflectionMethod::class, $result);
-        $this->assertSame('staticMethod', $result->getName());
-    }
-
-    public function testCallableReturnsReflectionMethodForArrayCallable(): void
-    {
-        $object = new AnnotatedClass();
-
-        $result = Reflection::callable([$object, 'annotatedMethod']);
-
-        $this->assertInstanceOf(ReflectionMethod::class, $result);
-        $this->assertSame('annotatedMethod', $result->getName());
-    }
-
-    public function testCallableReturnsReflectionMethodForClassArrayCallable(): void
-    {
-        $result = Reflection::callable([AnnotatedClass::class, 'staticMethod']);
-
-        $this->assertInstanceOf(ReflectionMethod::class, $result);
-        $this->assertSame('staticMethod', $result->getName());
-    }
-
-    public function testCallableReturnsReflectionMethodForInvokableObject(): void
-    {
-        $invokable = new InvokableClass();
-
-        $result = Reflection::callable($invokable);
-
-        $this->assertInstanceOf(ReflectionMethod::class, $result);
-        $this->assertSame('__invoke', $result->getName());
-    }
-
-    public function testCallableForInvokableObjectDoesNotPoisonClassReflection(): void
-    {
-        $invokable = new InvokableClass();
-
-        $callableReflection = Reflection::callable($invokable);
-        $classReflection = Reflection::class(InvokableClass::class);
-
-        $this->assertInstanceOf(ReflectionMethod::class, $callableReflection);
-        $this->assertInstanceOf(ReflectionClass::class, $classReflection);
-        $this->assertSame(InvokableClass::class, $classReflection->getName());
-        $this->assertSame($callableReflection, Reflection::callable($invokable));
-    }
-
-    public function testObjectReturnsReflectionObject(): void
-    {
-        $object = new PlainClass();
-
-        $result = Reflection::object($object);
-
-        $this->assertInstanceOf(ReflectionObject::class, $result);
-        $this->assertSame(PlainClass::class, $result->getName());
-    }
-
-    public function testObjectCachesReflection(): void
-    {
-        $object = new PlainClass();
-
-        $first = Reflection::object($object);
-        $second = Reflection::object($object);
-
-        $this->assertSame($first, $second);
-    }
-
-    public function testClassReturnsReflectionClassForExistingClass(): void
-    {
-        $result = Reflection::class(PlainClass::class);
-
-        $this->assertInstanceOf(ReflectionClass::class, $result);
-        $this->assertSame(PlainClass::class, $result->getName());
-    }
-
-    public function testClassReturnsNullForNonExistentClass(): void
-    {
-        $result = Reflection::class('NonExistentClass');
-
-        $this->assertNull($result);
-    }
-
-    public function testClassCachesReflection(): void
-    {
-        $first = Reflection::class(PlainClass::class);
-        $second = Reflection::class(PlainClass::class);
-
-        $this->assertSame($first, $second);
-    }
-
-    public function testGetDeepMetadataCollectsAttributesFromClassAndMembers(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $attributes = Reflection::getDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertArrayHasKey(AnnotatedClass::class, $attributes);
-        $this->assertArrayHasKey(AnnotatedClass::class . '::annotatedMethod', $attributes);
-        $this->assertArrayHasKey(AnnotatedClass::class . '::$name', $attributes);
-        $this->assertArrayHasKey(AnnotatedClass::class . '::STATUS', $attributes);
-    }
-
-    public function testGetDeepMetadataReturnsCorrectAttributeValues(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $attributes = Reflection::getDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertSame('class-level', $attributes[AnnotatedClass::class][0]->value);
-        $this->assertSame('method-level', $attributes[AnnotatedClass::class . '::annotatedMethod'][0]->value);
-        $this->assertSame('property-level', $attributes[AnnotatedClass::class . '::$name'][0]->value);
-        $this->assertSame('constant-level', $attributes[AnnotatedClass::class . '::STATUS'][0]->value);
-    }
-
-    public function testGetDeepMetadataReturnsEmptyArrayForPlainClass(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-
-        $attributes = Reflection::getDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertEmpty($attributes);
-    }
-
-    public function testGetFirstDeepMetadataReturnsFirstFoundAttribute(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $attribute = Reflection::getFirstDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertInstanceOf(TestAttribute::class, $attribute);
-        $this->assertSame('class-level', $attribute->value);
-    }
-
-    public function testGetFirstDeepMetadataReturnsNullWhenNoAttributesFound(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-
-        $attribute = Reflection::getFirstDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertNull($attribute);
-    }
-
-    public function testHasDeepMetadataReturnsTrueForClassWithAttributes(): void
-    {
-        $reflector = new ReflectionClass(AnnotatedClass::class);
-
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertTrue($result);
-    }
-
-    public function testHasDeepMetadataReturnsFalseForClassWithoutAttributes(): void
-    {
-        $reflector = new ReflectionClass(PlainClass::class);
-
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertFalse($result);
-    }
-
-    public function testHasDeepMetadataDetectsAttributeOnMethodOnly(): void
-    {
-        $reflector = new ReflectionClass(MethodOnlyAnnotated::class);
-
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertTrue($result);
-    }
-
-    public function testHasDeepMetadataDetectsAttributeOnPropertyOnly(): void
-    {
-        $reflector = new ReflectionClass(PropertyOnlyAnnotated::class);
-
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertTrue($result);
-    }
-
-    public function testHasDeepMetadataDetectsAttributeOnConstantOnly(): void
-    {
-        $reflector = new ReflectionClass(ConstantOnlyAnnotated::class);
-
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertTrue($result);
-    }
-
-    public function testGetMetadataReturnsAttributesFromAnonymousClass(): void
-    {
-        $anonymous = new #[TestAttribute('anonymous-class')] class {};
-        $reflector = new ReflectionObject($anonymous);
-
-        $metadata = Reflection::getMetadata($reflector);
-
-        $this->assertIsArray($metadata);
-        $this->assertCount(1, $metadata);
-        $this->assertInstanceOf(TestAttribute::class, $metadata[0]);
-        $this->assertSame('anonymous-class', $metadata[0]->value);
-    }
-
-    public function testGetFirstMetadataReturnsAttributeFromAnonymousClass(): void
-    {
-        $anonymous = new #[TestAttribute('first-anon')] #[AnotherAttribute(5)] class {};
-        $reflector = new ReflectionObject($anonymous);
-
-        $attribute = Reflection::getFirstMetadata($reflector, TestAttribute::class);
-
-        $this->assertInstanceOf(TestAttribute::class, $attribute);
-        $this->assertSame('first-anon', $attribute->value);
-    }
-
-    public function testHasMetadataReturnsTrueForAnonymousClassWithAttribute(): void
-    {
-        $anonymous = new #[TestAttribute] class {};
-        $reflector = new ReflectionObject($anonymous);
-
-        $result = Reflection::hasMetadata($reflector, TestAttribute::class);
-
-        $this->assertTrue($result);
-    }
-
-    public function testHasMetadataReturnsFalseForAnonymousClassWithoutAttribute(): void
-    {
-        $anonymous = new class {};
-        $reflector = new ReflectionObject($anonymous);
-
-        $result = Reflection::hasMetadata($reflector, TestAttribute::class);
-
-        $this->assertFalse($result);
-    }
-
-    public function testGetDeepMetadataCollectsAttributesFromAnonymousClassMembers(): void
-    {
-        $anonymous = new #[TestAttribute('anon-class')] class {
-            #[TestAttribute('anon-const')]
-            public const STATUS = 'active';
-
-            #[TestAttribute('anon-prop')]
-            public string $name = '';
-
-            #[TestAttribute('anon-method')]
-            public function process(): void {}
-        };
-        $reflector = new ReflectionObject($anonymous);
-
-        $attributes = Reflection::getDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertNotEmpty($attributes);
-
-        $values = [];
-        foreach ($attributes as $path => $attrList) {
-            foreach ($attrList as $attr) {
-                $values[] = $attr->value;
-            }
+use RuntimeException;
+use WeakReference;
+
+beforeEach(static function (): void {
+    CountingAttribute::$constructed = 0;
+});
+
+test('reads and filters metadata through the public API', function (): void {
+    $reflector = new ReflectionClass(AnnotatedClass::class);
+
+    $all = Reflection::getMetadata($reflector);
+    $filtered = Reflection::getMetadata($reflector, TestAttribute::class);
+
+    expect($all)
+        ->toHaveCount(2)
+        ->and($all[0])->toBeInstanceOf(TestAttribute::class)
+        ->and($all[1])->toBeInstanceOf(AnotherAttribute::class)
+        ->and($filtered)->toHaveCount(1)
+        ->and($filtered[0]->value)->toBe('class-level');
+});
+
+test('returns null when metadata is absent', function (): void {
+    $reflector = new ReflectionClass(PlainClass::class);
+
+    expect(Reflection::getMetadata($reflector, TestAttribute::class))->toBeNull()
+        ->and(Reflection::getFirstMetadata($reflector, TestAttribute::class))->toBeNull()
+        ->and(Reflection::hasMetadata($reflector, TestAttribute::class))->toBeFalse();
+});
+
+test('hasMetadata does not instantiate attributes', function (): void {
+    $reflector = new ReflectionClass(CountingAnnotatedClass::class);
+
+    expect(Reflection::hasMetadata($reflector, CountingAttribute::class))->toBeTrue()
+        ->and(CountingAttribute::$constructed)->toBe(0);
+
+    expect(Reflection::getFirstMetadata($reflector, CountingAttribute::class))
+        ->toBeInstanceOf(CountingAttribute::class)
+        ->and(CountingAttribute::$constructed)->toBe(1);
+});
+
+test('metadata calls return fresh attribute instances', function (): void {
+    $reflector = new ReflectionClass(AnnotatedClass::class);
+
+    $first = Reflection::getFirstMetadata($reflector, TestAttribute::class);
+    $first->value = 'mutated';
+    $second = Reflection::getFirstMetadata($reflector, TestAttribute::class);
+
+    expect($second)
+        ->not->toBe($first)
+        ->and($second->value)->toBe('class-level');
+});
+
+test('supports ReflectionClassConstant metadata directly', function (): void {
+    $constant = (new ReflectionClass(AnnotatedClass::class))->getReflectionConstant('STATUS');
+
+    expect($constant)->not->toBeFalse();
+
+    $metadata = Reflection::getMetadata($constant, TestAttribute::class);
+
+    expect($metadata)
+        ->toHaveCount(1)
+        ->and($metadata[0]->value)->toBe('constant-level');
+});
+
+test('reflect chooses the appropriate native reflector', function (): void {
+    $closure = static fn (): string => 'ok';
+    $object = new PlainClass();
+
+    expect(Reflection::reflect($closure))->toBeInstanceOf(ReflectionFunction::class)
+        ->and(Reflection::reflect($object))->toBeInstanceOf(ReflectionObject::class)
+        ->and(Reflection::reflect(PlainClass::class))->toBeInstanceOf(ReflectionClass::class)
+        ->and(Reflection::reflect(123))->toBeNull();
+});
+
+test('caches class function method closure and object reflectors independently', function (): void {
+    $closure = static function (): void {};
+    $object = new AnnotatedClass();
+
+    expect(Reflection::class(AnnotatedClass::class))->toBe(Reflection::class(AnnotatedClass::class))
+        ->and(Reflection::callable(__NAMESPACE__ . '\\sharedFunction'))->toBe(Reflection::callable(__NAMESPACE__ . '\\sharedFunction'))
+        ->and(Reflection::callable([AnnotatedClass::class, 'staticMethod']))->toBe(Reflection::callable([AnnotatedClass::class, 'staticMethod']))
+        ->and(Reflection::callable($closure))->toBe(Reflection::callable($closure))
+        ->and(Reflection::object($object))->toBe(Reflection::object($object));
+});
+
+test('closure callable and object reflection cannot poison each other', function (): void {
+    $closure = static function (): void {};
+
+    $objectReflection = Reflection::object($closure);
+    $callableReflection = Reflection::callable($closure);
+
+    expect($objectReflection)->toBeInstanceOf(ReflectionObject::class)
+        ->and($callableReflection)->toBeInstanceOf(ReflectionFunction::class)
+        ->and(Reflection::object($closure))->toBe($objectReflection)
+        ->and(Reflection::callable($closure))->toBe($callableReflection);
+});
+
+test('a class and function with the same FQN use separate caches', function (): void {
+    $classReflection = Reflection::class(SharedSymbol::class);
+    $functionReflection = Reflection::callable(__NAMESPACE__ . '\\SharedSymbol');
+
+    expect($classReflection)->toBeInstanceOf(ReflectionClass::class)
+        ->and($functionReflection)->toBeInstanceOf(ReflectionFunction::class)
+        ->and($classReflection->getName())->toBe(SharedSymbol::class)
+        ->and($functionReflection->getName())->toBe(__NAMESPACE__ . '\\SharedSymbol');
+});
+
+test('invokable callable reflection does not collide with class reflection', function (): void {
+    $invokable = new InvokableClass();
+
+    expect(Reflection::callable($invokable))->toBeInstanceOf(ReflectionMethod::class)
+        ->and(Reflection::class(InvokableClass::class))->toBeInstanceOf(ReflectionClass::class);
+});
+
+test('object and closure caches do not keep user objects alive', function (): void {
+    $object = new PlainClass();
+    $closure = static function (): void {};
+    $objectReference = WeakReference::create($object);
+    $closureReference = WeakReference::create($closure);
+
+    Reflection::object($object);
+    Reflection::callable($closure);
+
+    unset($object, $closure);
+    gc_collect_cycles();
+
+    expect($objectReference->get())->toBeNull()
+        ->and($closureReference->get())->toBeNull();
+});
+
+test('missing classes return null but autoloader failures propagate', function (): void {
+    expect(Reflection::class(__NAMESPACE__ . '\\DefinitelyMissingClass'))->toBeNull();
+
+    $class = __NAMESPACE__ . '\\BrokenAutoloadClass';
+    $loader = static function (string $candidate) use ($class): void {
+        if ($candidate === $class) {
+            throw new RuntimeException('autoload exploded');
         }
+    };
 
-        $this->assertContains('anon-class', $values);
-        $this->assertContains('anon-const', $values);
-        $this->assertContains('anon-prop', $values);
-        $this->assertContains('anon-method', $values);
+    spl_autoload_register($loader);
+    try {
+        expect(static fn () => Reflection::class($class))
+            ->toThrow(RuntimeException::class, 'autoload exploded');
+    } finally {
+        spl_autoload_unregister($loader);
     }
+});
 
-    public function testGetFirstDeepMetadataReturnsAttributeFromAnonymousClass(): void
-    {
-        $anonymous = new #[TestAttribute('deep-first')] class {};
-        $reflector = new ReflectionObject($anonymous);
+test('clearReflectors drops strong caches', function (): void {
+    $first = Reflection::class(PlainClass::class);
 
-        $attribute = Reflection::getFirstDeepMetadata($reflector, TestAttribute::class);
+    Reflection::clearReflectors();
 
-        $this->assertInstanceOf(TestAttribute::class, $attribute);
-        $this->assertSame('deep-first', $attribute->value);
-    }
+    expect(Reflection::class(PlainClass::class))->not->toBe($first);
+});
 
-    public function testHasDeepMetadataDetectsAttributeOnAnonymousClassMethod(): void
-    {
-        $anonymous = new class {
-            #[TestAttribute]
-            public function annotated(): void {}
-        };
-        $reflector = new ReflectionObject($anonymous);
+test('deep metadata uses unambiguous paths and includes property hooks', function (): void {
+    $metadata = Reflection::getDeepMetadata(
+        new ReflectionClass(AnnotatedClass::class),
+        TestAttribute::class,
+    );
 
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
+    expect($metadata)
+        ->toHaveKey(AnnotatedClass::class)
+        ->toHaveKey(AnnotatedClass::class . '::annotatedMethod()')
+        ->toHaveKey(AnnotatedClass::class . '::$name')
+        ->toHaveKey(AnnotatedClass::class . '::$hooked::get()')
+        ->toHaveKey(AnnotatedClass::class . '::$hooked::set()')
+        ->toHaveKey(AnnotatedClass::class . '::STATUS')
+        ->and($metadata[AnnotatedClass::class . '::$hooked::get()'][0]->value)->toBe('hook-get')
+        ->and($metadata[AnnotatedClass::class . '::$hooked::set()'][0]->value)->toBe('hook-set');
+});
 
-        $this->assertTrue($result);
-    }
+test('method and constant metadata with the same name do not overwrite each other', function (): void {
+    $metadata = Reflection::getDeepMetadata(
+        new ReflectionClass(CollisionAnnotatedClass::class),
+        TestAttribute::class,
+    );
 
-    public function testHasDeepMetadataDetectsAttributeOnAnonymousClassProperty(): void
-    {
-        $anonymous = new class {
-            #[TestAttribute]
-            public string $annotated = '';
-        };
-        $reflector = new ReflectionObject($anonymous);
+    expect($metadata[CollisionAnnotatedClass::class . '::STATUS()'][0]->value)->toBe('method')
+        ->and($metadata[CollisionAnnotatedClass::class . '::STATUS'][0]->value)->toBe('constant');
+});
 
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
+test('deep existence checks do not instantiate attributes', function (): void {
+    $reflector = new ReflectionClass(DeepCountingAnnotatedClass::class);
 
-        $this->assertTrue($result);
-    }
+    expect(Reflection::hasDeepMetadata($reflector, CountingAttribute::class))->toBeTrue()
+        ->and(CountingAttribute::$constructed)->toBe(0);
+});
 
-    public function testHasDeepMetadataReturnsFalseForPlainAnonymousClass(): void
-    {
-        $anonymous = new class {
-            public string $prop = '';
-            public function method(): void {}
-        };
-        $reflector = new ReflectionObject($anonymous);
+test('first deep metadata stops after the first matching attribute', function (): void {
+    $attribute = Reflection::getFirstDeepMetadata(
+        new ReflectionClass(AnnotatedClass::class),
+        TestAttribute::class,
+    );
 
-        $result = Reflection::hasDeepMetadata($reflector, TestAttribute::class);
+    expect($attribute)
+        ->toBeInstanceOf(TestAttribute::class)
+        ->and($attribute->value)->toBe('class-level');
+});
 
-        $this->assertFalse($result);
-    }
-
-    public function testReflectReturnsReflectionObjectForAnonymousClassInstance(): void
-    {
-        $anonymous = new class {};
-
-        $result = Reflection::reflect($anonymous);
-
-        $this->assertInstanceOf(ReflectionObject::class, $result);
-    }
-
-    public function testObjectReturnsReflectionObjectForAnonymousClass(): void
-    {
-        $anonymous = new class {};
-
-        $result = Reflection::object($anonymous);
-
-        $this->assertInstanceOf(ReflectionObject::class, $result);
-    }
-
-    public function testObjectCachesAnonymousClassReflection(): void
-    {
-        $anonymous = new class {};
-
-        $first = Reflection::object($anonymous);
-        $second = Reflection::object($anonymous);
-
-        $this->assertSame($first, $second);
-    }
-
-    public function testGetMetadataWorksWithAnonymousClassMethodReflection(): void
-    {
-        $anonymous = new class {
-            #[TestAttribute('method-attr')]
-            public function annotated(): void {}
-        };
-        $reflector = new ReflectionObject($anonymous);
-        $methodReflector = $reflector->getMethod('annotated');
-
-        $metadata = Reflection::getMetadata($methodReflector, TestAttribute::class);
-
-        $this->assertIsArray($metadata);
-        $this->assertCount(1, $metadata);
-        $this->assertSame('method-attr', $metadata[0]->value);
-    }
-
-    public function testGetDeepMetadataPathsContainAnonymousClassName(): void
-    {
-        $anonymous = new #[TestAttribute('path-test')] class {
-            #[TestAttribute('method-path')]
-            public function test(): void {}
-        };
-        $reflector = new ReflectionObject($anonymous);
-        $className = $reflector->getName();
-
-        $attributes = Reflection::getDeepMetadata($reflector, TestAttribute::class);
-
-        $this->assertArrayHasKey($className, $attributes);
-        $this->assertArrayHasKey($className . '::test', $attributes);
-    }
-}
+function sharedFunction(): void {}
+function SharedSymbol(): void {}
 
 #[Attribute(Attribute::TARGET_ALL | Attribute::IS_REPEATABLE)]
 final class TestAttribute
 {
-    public function __construct(public readonly string $value = 'default') {}
+    public function __construct(public string $value = 'default') {}
 }
 
 #[Attribute(Attribute::TARGET_CLASS)]
 final class AnotherAttribute
 {
     public function __construct(public readonly int $priority = 0) {}
+}
+
+#[Attribute(Attribute::TARGET_ALL)]
+final class CountingAttribute
+{
+    public static int $constructed = 0;
+
+    public function __construct()
+    {
+        ++self::$constructed;
+    }
 }
 
 #[TestAttribute('class-level')]
@@ -581,20 +248,21 @@ final class AnnotatedClass
     #[TestAttribute('property-level')]
     public string $name = '';
 
+    public string $hooked = '' {
+        #[TestAttribute('hook-get')]
+        get => $this->hooked;
+
+        #[TestAttribute('hook-set')]
+        set => $value;
+    }
+
     #[TestAttribute('method-level')]
     public function annotatedMethod(): void {}
-
-    public function plainMethod(): void {}
 
     public static function staticMethod(): void {}
 }
 
-final class PlainClass
-{
-    public string $value = '';
-
-    public function doSomething(): void {}
-}
+final class PlainClass {}
 
 final class InvokableClass
 {
@@ -604,20 +272,22 @@ final class InvokableClass
     }
 }
 
-final class MethodOnlyAnnotated
+final class SharedSymbol {}
+
+#[CountingAttribute]
+final class CountingAnnotatedClass {}
+
+final class DeepCountingAnnotatedClass
 {
-    #[TestAttribute]
-    public function method(): void {}
+    #[CountingAttribute]
+    public function annotated(): void {}
 }
 
-final class PropertyOnlyAnnotated
+final class CollisionAnnotatedClass
 {
-    #[TestAttribute]
-    public string $prop = '';
-}
+    #[TestAttribute('constant')]
+    public const STATUS = 'active';
 
-final class ConstantOnlyAnnotated
-{
-    #[TestAttribute]
-    public const VALUE = 1;
+    #[TestAttribute('method')]
+    public function STATUS(): void {}
 }
