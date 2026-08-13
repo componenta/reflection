@@ -199,9 +199,9 @@ final class Reflection
         }
 
         if (!class_exists($class)
-            && !interface_exists($class)
-            && !trait_exists($class)
-            && !enum_exists($class)
+            && !interface_exists($class, false)
+            && !trait_exists($class, false)
+            && !enum_exists($class, false)
         ) {
             return null;
         }
