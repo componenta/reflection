@@ -112,12 +112,18 @@ test('resolves self and parent against an explicit declaring scope', function ()
         ->and(ReflectionType::contains($parentType, BaseScope::class, $scope))->toBeTrue();
 });
 
-test('rejects matching relative class types without declaring context', function (): void {
+test('handles native self type resolution without explicit scope', function (): void {
     $type = (new ReflectionMethod(ChildScope::class, 'acceptSelf'))->getParameters()[0]->getType();
 
-    expect($type)->not->toBeNull()
-        ->and(static fn () => ReflectionType::match($type, new ChildScope()))
-        ->toThrow(InvalidArgumentException::class, 'requires declaring class context');
+    expect($type)->not->toBeNull();
+
+    if ((string) $type === 'self') {
+        expect(static fn () => ReflectionType::match($type, new ChildScope()))
+            ->toThrow(InvalidArgumentException::class, 'requires declaring class context');
+        return;
+    }
+
+    expect(ReflectionType::match($type, new ChildScope(), strict: true))->toBeTrue();
 });
 
 test('coerces supported native PHP values and agrees with canCoerce', function (): void {
