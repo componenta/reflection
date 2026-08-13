@@ -8,6 +8,7 @@ use Closure;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionClassConstant;
+use ReflectionConstant;
 use ReflectionFunction;
 use ReflectionFunctionAbstract;
 use ReflectionMethod;
@@ -17,9 +18,6 @@ use ReflectionProperty;
 use Reflector;
 use WeakMap;
 
-/**
- * Cached helpers around PHP's native reflection API.
- */
 final class Reflection
 {
     /** @var array<string, ReflectionClass<object>> */
@@ -37,33 +35,28 @@ final class Reflection
     /** @var WeakMap<object, ReflectionObject<object>>|null */
     private static ?WeakMap $objects = null;
 
-    /**
-     * Cached attribute definitions. Attribute instances themselves are deliberately
-     * not cached: user-defined attributes may be mutable.
-     *
-     * @var WeakMap<Reflector, array<string, list<ReflectionAttribute<object>>|null>>|null
-     */
+    /** @var WeakMap<Reflector, array<string, list<ReflectionAttribute<object>>|null>>|null */
     private static ?WeakMap $metadata = null;
 
     /**
      * @template T of object
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @param class-string<T>|null $name
      * @return list<T>|null
      */
     public static function getMetadata(
-        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector,
+        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector,
         ?string $name = null,
     ): ?array {
-        $attributes = self::metadataDefinitions($reflector, $name);
-        if ($attributes === null) {
+        $definitions = self::metadataDefinitions($reflector, $name);
+        if ($definitions === null) {
             return null;
         }
 
         $instances = [];
-        foreach ($attributes as $attribute) {
+        foreach ($definitions as $definition) {
             /** @var T $instance */
-            $instance = $attribute->newInstance();
+            $instance = $definition->newInstance();
             $instances[] = $instance;
         }
 
@@ -72,65 +65,53 @@ final class Reflection
 
     /**
      * @template T of object
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @param class-string<T> $name
      * @return T|null
      */
     public static function getFirstMetadata(
-        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector,
+        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector,
         string $name,
     ): ?object {
-        $attributes = self::metadataDefinitions($reflector, $name);
-        if ($attributes === null) {
+        $definitions = self::metadataDefinitions($reflector, $name);
+        if ($definitions === null) {
             return null;
         }
 
         /** @var T $instance */
-        $instance = $attributes[0]->newInstance();
+        $instance = $definitions[0]->newInstance();
 
         return $instance;
     }
 
     /**
-     * Checks for an attribute without instantiating it.
-     *
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @param class-string $name
      */
     public static function hasMetadata(
-        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector,
+        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector,
         string $name,
     ): bool {
         return self::metadataDefinitions($reflector, $name) !== null;
     }
 
-    /**
-     * Reflects a supported value, or returns null when no reflector can be produced.
-     *
-     * @return ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionObject<object>|null
-     */
-    public static function reflect(mixed $var): ReflectionFunctionAbstract|ReflectionClass|ReflectionObject|null
+    /** @return ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionObject<object>|null */
+    public static function reflect(mixed $value): ReflectionFunctionAbstract|ReflectionClass|ReflectionObject|null
     {
         return match (true) {
-            is_callable($var) => self::callable($var),
-            is_object($var) => self::object($var),
-            is_string($var) => self::class($var),
+            is_callable($value) => self::callable($value),
+            is_object($value) => self::object($value),
+            is_string($value) => self::class($value),
             default => null,
         };
     }
 
-    /**
-     * Returns a cached reflector for a callable.
-     */
     public static function callable(callable $callable): ReflectionFunctionAbstract
     {
         if ($callable instanceof Closure) {
             $cache = self::$closures ??= new WeakMap();
-            if (isset($cache[$callable])) {
-                return $cache[$callable];
-            }
 
-            return $cache[$callable] = new ReflectionFunction($callable);
+            return $cache[$callable] ??= new ReflectionFunction($callable);
         }
 
         if (is_string($callable)) {
@@ -141,19 +122,16 @@ final class Reflection
             }
 
             $key = self::functionKey($callable);
-            if (isset(self::$functions[$key])) {
-                return self::$functions[$key];
-            }
 
-            return self::$functions[$key] = new ReflectionFunction($callable);
+            return self::$functions[$key] ??= new ReflectionFunction($callable);
         }
 
         if (is_array($callable)) {
-            [$objectOrClass, $method] = $callable;
-            if (is_object($objectOrClass)) {
-                $class = $objectOrClass::class;
-            } elseif (is_string($objectOrClass)) {
-                $class = $objectOrClass;
+            [$owner, $method] = $callable;
+            if (is_object($owner)) {
+                $class = $owner::class;
+            } elseif (is_string($owner)) {
+                $class = $owner;
             } else {
                 throw new \LogicException('Callable method owner must be an object or class name.');
             }
@@ -168,29 +146,15 @@ final class Reflection
         return self::method($callable::class, '__invoke');
     }
 
-    /**
-     * Returns a cached reflector for an object without keeping that object alive.
-     *
-     * @return ReflectionObject<object>
-     */
+    /** @return ReflectionObject<object> */
     public static function object(object $object): ReflectionObject
     {
         $cache = self::$objects ??= new WeakMap();
-        if (isset($cache[$object])) {
-            return $cache[$object];
-        }
 
-        return $cache[$object] = new ReflectionObject($object);
+        return $cache[$object] ??= new ReflectionObject($object);
     }
 
-    /**
-     * Returns a cached reflector for a class.
-     *
-     * Only a missing/invalid reflected class is converted to null. Exceptions raised
-     * by an autoloader propagate so the original application failure is not hidden.
-     *
-     * @return ReflectionClass<object>|null
-     */
+    /** @return ReflectionClass<object>|null */
     public static function class(string $class): ?ReflectionClass
     {
         $key = self::classKey($class);
@@ -211,11 +175,6 @@ final class Reflection
     }
 
     /**
-     * Collects attributes from a class, methods, properties, property hooks and constants.
-     *
-     * Method paths end in `()` so they cannot collide with class-constant paths.
-     * Property-hook paths follow native hook names, for example `Class::$name::get()`.
-     *
      * @template T of object
      * @param ReflectionClass<object> $reflector
      * @param class-string<T>|null $name
@@ -225,51 +184,28 @@ final class Reflection
     {
         $result = [];
         $className = $reflector->getName();
-
         self::appendMetadata($result, $className, $reflector, $name);
 
         foreach ($reflector->getMethods() as $method) {
-            self::appendMetadata(
-                $result,
-                $className . '::' . $method->getName() . '()',
-                $method,
-                $name,
-            );
+            self::appendMetadata($result, $className . '::' . $method->getName() . '()', $method, $name);
         }
 
         foreach ($reflector->getProperties() as $property) {
-            self::appendMetadata(
-                $result,
-                $className . '::$' . $property->getName(),
-                $property,
-                $name,
-            );
+            self::appendMetadata($result, $className . '::$' . $property->getName(), $property, $name);
 
             foreach ($property->getHooks() as $hook) {
-                self::appendMetadata(
-                    $result,
-                    $className . '::' . $hook->getName() . '()',
-                    $hook,
-                    $name,
-                );
+                self::appendMetadata($result, $className . '::' . $hook->getName() . '()', $hook, $name);
             }
         }
 
         foreach ($reflector->getReflectionConstants() as $constant) {
-            self::appendMetadata(
-                $result,
-                $className . '::' . $constant->getName(),
-                $constant,
-                $name,
-            );
+            self::appendMetadata($result, $className . '::' . $constant->getName(), $constant, $name);
         }
 
         return $result;
     }
 
     /**
-     * Returns the first matching deep attribute while instantiating only that attribute.
-     *
      * @template T of object
      * @param ReflectionClass<object> $reflector
      * @param class-string<T> $name
@@ -314,8 +250,6 @@ final class Reflection
     }
 
     /**
-     * Checks deep metadata without instantiating attributes.
-     *
      * @param ReflectionClass<object> $reflector
      * @param class-string $name
      */
@@ -352,9 +286,6 @@ final class Reflection
         return false;
     }
 
-    /**
-     * Clears all process-local caches.
-     */
     public static function clearReflectors(): void
     {
         self::$classes = [];
@@ -366,27 +297,49 @@ final class Reflection
     }
 
     /**
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @return list<ReflectionAttribute<object>>|null
      */
     private static function metadataDefinitions(
-        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector,
+        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector,
         ?string $name,
     ): ?array {
         $cache = self::$metadata ??= new WeakMap();
-        $key = $name ?? '';
+        $key = $name === null ? 'all' : 'name:' . strtolower($name);
         $byName = $cache[$reflector] ?? [];
 
         if (array_key_exists($key, $byName)) {
             return $byName[$key];
         }
 
-        /** @var list<ReflectionAttribute<object>> $attributes */
-        $attributes = $reflector->getAttributes($name);
-        $byName[$key] = $attributes === [] ? null : $attributes;
+        $definitions = self::attributeDefinitions($reflector, $name);
+        $byName[$key] = $definitions === [] ? null : $definitions;
         $cache[$reflector] = $byName;
 
         return $byName[$key];
+    }
+
+    /**
+     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
+     * @return list<ReflectionAttribute<object>>
+     */
+    private static function attributeDefinitions(
+        ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector,
+        ?string $name,
+    ): array {
+        if (!$reflector instanceof ReflectionConstant) {
+            /** @var list<ReflectionAttribute<object>> */
+            return $reflector->getAttributes($name);
+        }
+
+        if (!method_exists($reflector, 'getAttributes')) {
+            return [];
+        }
+
+        /** @var list<ReflectionAttribute<object>> $attributes */
+        $attributes = new ReflectionMethod($reflector, 'getAttributes')->invoke($reflector, $name);
+
+        return $attributes;
     }
 
     /**
@@ -411,11 +364,8 @@ final class Reflection
     private static function method(string $class, string $method): ReflectionMethod
     {
         $key = self::classKey($class) . '::' . strtolower($method);
-        if (isset(self::$methods[$key])) {
-            return self::$methods[$key];
-        }
 
-        return self::$methods[$key] = new ReflectionMethod($class, $method);
+        return self::$methods[$key] ??= new ReflectionMethod($class, $method);
     }
 
     private static function classKey(string $class): string
