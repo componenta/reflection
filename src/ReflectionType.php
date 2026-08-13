@@ -7,7 +7,6 @@ namespace Componenta\Reflection;
 use Componenta\Arrayable\Arrayable;
 use InvalidArgumentException;
 use ReflectionClass;
-use ReflectionException;
 use ReflectionIntersectionType;
 use ReflectionNamedType;
 use ReflectionType as NativeReflectionType;
@@ -485,14 +484,15 @@ final class ReflectionType
             return $scope;
         }
 
-        try {
-            return new ReflectionClass($scope);
-        } catch (ReflectionException $exception) {
-            throw new InvalidArgumentException(
-                sprintf('Invalid reflection type scope: %s.', $scope),
-                previous: $exception,
-            );
+        $reflection = Reflection::class($scope);
+        if ($reflection === null) {
+            throw new InvalidArgumentException(sprintf(
+                'Invalid reflection type scope: %s.',
+                $scope,
+            ));
         }
+
+        return $reflection;
     }
 
     private static function coercionException(NativeReflectionType $type, mixed $value): InvalidArgumentException
