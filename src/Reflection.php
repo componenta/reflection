@@ -332,12 +332,13 @@ final class Reflection
             return $reflector->getAttributes($name);
         }
 
-        if (!method_exists($reflector, 'getAttributes')) {
+        $method = self::constantAttributeMethod();
+        if (!method_exists($reflector, $method)) {
             return [];
         }
 
         /** @var list<ReflectionAttribute<object>> $attributes */
-        $attributes = new ReflectionMethod($reflector, 'getAttributes')->invoke($reflector, $name);
+        $attributes = new ReflectionMethod($reflector, $method)->invoke($reflector, $name);
 
         return $attributes;
     }
@@ -359,6 +360,11 @@ final class Reflection
         if ($metadata !== null) {
             $result[$path] = $metadata;
         }
+    }
+
+    private static function constantAttributeMethod(): string
+    {
+        return 'getAttributes';
     }
 
     private static function method(string $class, string $method): ReflectionMethod
