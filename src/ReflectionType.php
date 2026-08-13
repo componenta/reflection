@@ -183,7 +183,7 @@ final class ReflectionType
             'object' => is_object($var),
             'array' => is_array($var),
             'bool' => is_bool($var),
-            'int' => $strict ? is_int($var) : is_numeric($var),
+            'int' => $strict ? is_int($var) : self::matchesIntLoosely($var),
             'float' => $strict ? is_float($var) : is_numeric($var),
             'string' => $strict ? is_string($var) : is_string($var) || $var instanceof Stringable,
             'false' => $var === false,
@@ -249,7 +249,8 @@ final class ReflectionType
 
         return match ($type->getName()) {
             'mixed' => true,
-            'int', 'float' => is_int($value)
+            'int' => self::canCoerceToInt($value),
+            'float' => is_int($value)
                 || is_float($value)
                 || is_bool($value)
                 || (is_string($value) && is_numeric($value)),
@@ -350,18 +351,82 @@ final class ReflectionType
 
     private static function coerceToInt(mixed $value): int
     {
+        if (!self::canCoerceToInt($value)) {
+            throw new InvalidArgumentException(sprintf(
+                'Value of type %s cannot be coerced to int.',
+                get_debug_type($value),
+            ));
+        }
+
+        return (int) $value;
+    }
+
+    private static function canCoerceToInt(mixed $value): bool
+    {
+        return is_bool($value) || self::matchesIntLoosely($value);
+    }
+
+    private static function matchesIntLoosely(mixed $value): bool
+    {
         if (is_int($value)) {
-            return $value;
+            return true;
         }
 
-        if (is_float($value) || is_bool($value) || (is_string($value) && is_numeric($value))) {
-            return (int) $value;
+        if (is_float($value)) {
+            return self::floatFitsInt($value);
         }
 
-        throw new InvalidArgumentException(sprintf(
-            'Value of type %s cannot be coerced to int.',
-            get_debug_type($value),
-        ));
+        if (!is_string($value) || !is_numeric($value)) {
+            return false;
+        }
+
+        $integerString = self::integerStringFitsInt($value);
+        if ($integerString !== null) {
+            return $integerString;
+        }
+
+        return self::floatFitsInt((float) $value);
+    }
+
+    private static function floatFitsInt(float $value): bool
+    {
+        if (!is_finite($value) || $value < PHP_INT_MIN || $value > PHP_INT_MAX) {
+            return false;
+        }
+
+        $converted = (int) $value;
+
+        return !($value > 0 && $converted < 0)
+            && !($value < 0 && $converted > 0);
+    }
+
+    /**
+     * Returns null when the numeric string is not an integer literal, otherwise
+     * whether that integer literal fits the current platform integer range.
+     */
+    private static function integerStringFitsInt(string $value): ?bool
+    {
+        $value = trim($value);
+        if (preg_match('/^[+-]?\d+$/D', $value) !== 1) {
+            return null;
+        }
+
+        $negative = str_starts_with($value, '-');
+        $digits = ltrim($value, '+-');
+        $digits = ltrim($digits, '0');
+        if ($digits === '') {
+            return true;
+        }
+
+        $limit = $negative
+            ? substr((string) PHP_INT_MIN, 1)
+            : (string) PHP_INT_MAX;
+
+        $length = strlen($digits);
+        $limitLength = strlen($limit);
+
+        return $length < $limitLength
+            || ($length === $limitLength && strcmp($digits, $limit) <= 0);
     }
 
     private static function coerceToFloat(mixed $value): float
