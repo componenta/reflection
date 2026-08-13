@@ -1,6 +1,15 @@
 {
     "name": "componenta/reflection",
-    "description": "Reflection helpers for Componenta",
+    "description": "Reflection utilities for PHP 8.4+ with attribute metadata, deep reflection, type inspection and safe coercion",
+    "keywords": [
+        "attributes",
+        "componenta",
+        "metadata",
+        "php",
+        "reflection",
+        "reflection-type",
+        "type-coercion"
+    ],
     "type": "library",
     "license": "MIT",
     "require": {
