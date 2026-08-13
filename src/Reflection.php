@@ -98,8 +98,15 @@ final class Reflection
     /** @return ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionObject<object>|null */
     public static function reflect(mixed $value): ReflectionFunctionAbstract|ReflectionClass|ReflectionObject|null
     {
+        if (is_callable($value)) {
+            try {
+                return self::callable($value);
+            } catch (\InvalidArgumentException) {
+                return null;
+            }
+        }
+
         return match (true) {
-            is_callable($value) => self::callable($value),
             is_object($value) => self::object($value),
             is_string($value) => self::class($value),
             default => null,
@@ -118,7 +125,7 @@ final class Reflection
             if (str_contains($callable, '::')) {
                 [$class, $method] = explode('::', $callable, 2);
 
-                return self::method($class, $method);
+                return self::concreteMethod($class, $method, true);
             }
 
             $key = self::functionKey($callable);
@@ -136,7 +143,7 @@ final class Reflection
                 throw new \LogicException('Callable method owner must be an object or class name.');
             }
 
-            return self::method($class, (string) $method);
+            return self::concreteMethod($class, (string) $method, is_string($owner));
         }
 
         if (!is_object($callable)) {
@@ -365,6 +372,28 @@ final class Reflection
     private static function constantAttributeMethod(): string
     {
         return 'getAttributes';
+    }
+
+    private static function concreteMethod(string $class, string $method, bool $staticOwner): ReflectionMethod
+    {
+        if (!method_exists($class, $method)) {
+            throw new \InvalidArgumentException(sprintf(
+                'Callable %s::%s() is resolved through magic dispatch and has no concrete method to reflect.',
+                $class,
+                $method,
+            ));
+        }
+
+        $reflection = self::method($class, $method);
+        if (!$reflection->isPublic() || ($staticOwner && !$reflection->isStatic())) {
+            throw new \InvalidArgumentException(sprintf(
+                'Callable %s::%s() is resolved through magic dispatch rather than the declared method.',
+                $class,
+                $method,
+            ));
+        }
+
+        return $reflection;
     }
 
     private static function method(string $class, string $method): ReflectionMethod
