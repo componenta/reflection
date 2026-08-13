@@ -14,39 +14,101 @@ use ReflectionType as NativeReflectionType;
 use ReflectionUnionType;
 use Stringable;
 
+/**
+ * Utilities for inspecting, matching and performing simple native PHP type coercion.
+ *
+ * This class deliberately does not replace componenta/caster: it only understands
+ * reflected PHP types and PHP-level conversions, not named/domain-specific casters.
+ */
 final class ReflectionType
 {
-    public static function match(?NativeReflectionType $type, mixed $var, bool $strict = false, ReflectionClass|string|null $scope = null): bool
-    {
-        return $type === null || self::matchType($type, $var, $strict, self::normalizeScope($scope));
+    /**
+     * Checks whether a value matches a reflected PHP type.
+     *
+     * Supply $scope when the reflected type may contain self, parent or static.
+     *
+     * @param ReflectionClass<object>|class-string|null $scope
+     */
+    public static function match(
+        ?NativeReflectionType $type,
+        mixed $var,
+        bool $strict = false,
+        ReflectionClass|string|null $scope = null,
+    ): bool {
+        if ($type === null) {
+            return true;
+        }
+
+        return self::matchType($type, $var, $strict, self::normalizeScope($scope));
     }
 
-    public static function canCoerce(NativeReflectionType $type, mixed $value, ReflectionClass|string|null $scope = null): bool
-    {
+    /**
+     * Checks whether coerce() can perform one unambiguous PHP-level conversion.
+     *
+     * @param ReflectionClass<object>|class-string|null $scope
+     */
+    public static function canCoerce(
+        NativeReflectionType $type,
+        mixed $value,
+        ReflectionClass|string|null $scope = null,
+    ): bool {
         return self::canCoerceType($type, $value, self::normalizeScope($scope));
     }
 
-    public static function coerce(NativeReflectionType $type, mixed $value, ReflectionClass|string|null $scope = null): mixed
-    {
+    /**
+     * Coerces a value to a reflected PHP type.
+     *
+     * Union coercion is allowed only when the value already matches one branch or
+     * exactly one branch is coercible. Ambiguous conversions are rejected.
+     *
+     * @param ReflectionClass<object>|class-string|null $scope
+     * @throws InvalidArgumentException When the conversion is impossible or ambiguous.
+     */
+    public static function coerce(
+        NativeReflectionType $type,
+        mixed $value,
+        ReflectionClass|string|null $scope = null,
+    ): mixed {
         return self::coerceType($type, $value, self::normalizeScope($scope));
     }
 
+    /**
+     * Returns PHP's canonical string representation of a reflected type.
+     */
     public static function toString(NativeReflectionType $type): string
     {
         return (string) $type;
     }
 
-    /** @return list<string> */
-    public static function getTypeNames(NativeReflectionType $type, ReflectionClass|string|null $scope = null): array
-    {
+    /**
+     * Returns every named type contained in a named, union, intersection or DNF type.
+     *
+     * Relative names are returned literally unless $scope is supplied, in which case
+     * self, parent and static are resolved to class names.
+     *
+     * @param ReflectionClass<object>|class-string|null $scope
+     * @return list<string>
+     */
+    public static function getTypeNames(
+        NativeReflectionType $type,
+        ReflectionClass|string|null $scope = null,
+    ): array {
         $names = [];
         self::collectTypeNames($type, self::normalizeScope($scope), $names);
 
         return array_values(array_unique($names));
     }
 
-    public static function contains(?NativeReflectionType $type, string $typeName, ReflectionClass|string|null $scope = null): bool
-    {
+    /**
+     * Checks whether a reflected type contains a named type, including inside DNF types.
+     *
+     * @param ReflectionClass<object>|class-string|null $scope
+     */
+    public static function contains(
+        ?NativeReflectionType $type,
+        string $typeName,
+        ReflectionClass|string|null $scope = null,
+    ): bool {
         if ($type === null) {
             return false;
         }
@@ -60,8 +122,13 @@ final class ReflectionType
         return false;
     }
 
-    private static function matchType(NativeReflectionType $type, mixed $var, bool $strict, ?ReflectionClass $scope): bool
-    {
+    /** @param ReflectionClass<object>|null $scope */
+    private static function matchType(
+        NativeReflectionType $type,
+        mixed $var,
+        bool $strict,
+        ?ReflectionClass $scope,
+    ): bool {
         if ($type instanceof ReflectionNamedType) {
             return self::matchNamedType($type, $var, $strict, $scope);
         }
@@ -89,8 +156,13 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    private static function matchNamedType(ReflectionNamedType $type, mixed $var, bool $strict, ?ReflectionClass $scope): bool
-    {
+    /** @param ReflectionClass<object>|null $scope */
+    private static function matchNamedType(
+        ReflectionNamedType $type,
+        mixed $var,
+        bool $strict,
+        ?ReflectionClass $scope,
+    ): bool {
         if ($type->allowsNull() && $var === null) {
             return true;
         }
@@ -125,18 +197,22 @@ final class ReflectionType
         };
     }
 
-    private static function canCoerceType(NativeReflectionType $type, mixed $value, ?ReflectionClass $scope): bool
-    {
+    /** @param ReflectionClass<object>|null $scope */
+    private static function canCoerceType(
+        NativeReflectionType $type,
+        mixed $value,
+        ?ReflectionClass $scope,
+    ): bool {
         if ($type instanceof ReflectionNamedType) {
             return self::canCoerceNamedType($type, $value, $scope);
         }
 
         if ($type instanceof ReflectionIntersectionType) {
-            return self::matchType($type, $value, true, $scope);
+            return self::matchType($type, $value, strict: true, scope: $scope);
         }
 
         if ($type instanceof ReflectionUnionType) {
-            if (self::matchType($type, $value, true, $scope)) {
+            if (self::matchType($type, $value, strict: true, scope: $scope)) {
                 return true;
             }
 
@@ -146,7 +222,8 @@ final class ReflectionType
                     continue;
                 }
 
-                if (++$coercible > 1) {
+                ++$coercible;
+                if ($coercible > 1) {
                     return false;
                 }
             }
@@ -157,39 +234,50 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    private static function canCoerceNamedType(ReflectionNamedType $type, mixed $value, ?ReflectionClass $scope): bool
-    {
+    /** @param ReflectionClass<object>|null $scope */
+    private static function canCoerceNamedType(
+        ReflectionNamedType $type,
+        mixed $value,
+        ?ReflectionClass $scope,
+    ): bool {
         if ($value === null) {
             return $type->allowsNull();
         }
 
         if (!$type->isBuiltin()) {
-            return self::matchNamedType($type, $value, true, $scope);
+            return self::matchNamedType($type, $value, strict: true, scope: $scope);
         }
 
         return match ($type->getName()) {
             'mixed' => true,
-            'int', 'float' => is_int($value) || is_float($value) || is_bool($value) || is_string($value) && is_numeric($value),
+            'int', 'float' => is_int($value)
+                || is_float($value)
+                || is_bool($value)
+                || (is_string($value) && is_numeric($value)),
             'string' => is_scalar($value) || $value instanceof Stringable,
             'bool' => is_scalar($value),
             'array' => is_array($value) || is_iterable($value) || $value instanceof Arrayable,
             'object' => is_object($value) || is_array($value),
             'iterable' => is_iterable($value),
             'callable' => is_callable($value),
-            'null', 'false', 'true', 'resource' => self::matchBuiltinType($type->getName(), $value, true),
+            'null', 'false', 'true', 'resource' => self::matchBuiltinType($type->getName(), $value, strict: true),
             'never', 'void' => false,
-            default => self::matchBuiltinType($type->getName(), $value, true),
+            default => self::matchBuiltinType($type->getName(), $value, strict: true),
         };
     }
 
-    private static function coerceType(NativeReflectionType $type, mixed $value, ?ReflectionClass $scope): mixed
-    {
+    /** @param ReflectionClass<object>|null $scope */
+    private static function coerceType(
+        NativeReflectionType $type,
+        mixed $value,
+        ?ReflectionClass $scope,
+    ): mixed {
         if ($type instanceof ReflectionNamedType) {
             return self::coerceNamedType($type, $value, $scope);
         }
 
         if ($type instanceof ReflectionIntersectionType) {
-            if (self::matchType($type, $value, true, $scope)) {
+            if (self::matchType($type, $value, strict: true, scope: $scope)) {
                 return $value;
             }
 
@@ -197,7 +285,7 @@ final class ReflectionType
         }
 
         if ($type instanceof ReflectionUnionType) {
-            if (self::matchType($type, $value, true, $scope)) {
+            if (self::matchType($type, $value, strict: true, scope: $scope)) {
                 return $value;
             }
 
@@ -228,14 +316,18 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    private static function coerceNamedType(ReflectionNamedType $type, mixed $value, ?ReflectionClass $scope): mixed
-    {
+    /** @param ReflectionClass<object>|null $scope */
+    private static function coerceNamedType(
+        ReflectionNamedType $type,
+        mixed $value,
+        ?ReflectionClass $scope,
+    ): mixed {
         if ($value === null && $type->allowsNull()) {
             return null;
         }
 
         if (!$type->isBuiltin()) {
-            if (self::matchNamedType($type, $value, true, $scope)) {
+            if (self::matchNamedType($type, $value, strict: true, scope: $scope)) {
                 return $value;
             }
 
@@ -247,9 +339,9 @@ final class ReflectionType
         }
 
         return match ($type->getName()) {
-            'int' => (int) $value,
-            'float' => (float) $value,
-            'string' => (string) $value,
+            'int' => self::coerceToInt($value),
+            'float' => self::coerceToFloat($value),
+            'string' => self::coerceToString($value),
             'bool' => (bool) $value,
             'array' => self::coerceToArray($value),
             'object' => is_object($value) ? $value : (object) $value,
@@ -257,6 +349,51 @@ final class ReflectionType
         };
     }
 
+    private static function coerceToInt(mixed $value): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+
+        if (is_float($value) || is_bool($value) || (is_string($value) && is_numeric($value))) {
+            return (int) $value;
+        }
+
+        throw new InvalidArgumentException(sprintf(
+            'Value of type %s cannot be coerced to int.',
+            get_debug_type($value),
+        ));
+    }
+
+    private static function coerceToFloat(mixed $value): float
+    {
+        if (is_float($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_bool($value) || (is_string($value) && is_numeric($value))) {
+            return (float) $value;
+        }
+
+        throw new InvalidArgumentException(sprintf(
+            'Value of type %s cannot be coerced to float.',
+            get_debug_type($value),
+        ));
+    }
+
+    private static function coerceToString(mixed $value): string
+    {
+        if (is_scalar($value) || $value instanceof Stringable) {
+            return (string) $value;
+        }
+
+        throw new InvalidArgumentException(sprintf(
+            'Value of type %s cannot be coerced to string.',
+            get_debug_type($value),
+        ));
+    }
+
+    /** @return array<array-key, mixed> */
     private static function coerceToArray(mixed $value): array
     {
         if (is_array($value)) {
@@ -277,11 +414,17 @@ final class ReflectionType
         ));
     }
 
-    /** @param list<string> $names */
-    private static function collectTypeNames(NativeReflectionType $type, ?ReflectionClass $scope, array &$names): void
-    {
+    /**
+     * @param ReflectionClass<object>|null $scope
+     * @param list<string> $names
+     */
+    private static function collectTypeNames(
+        NativeReflectionType $type,
+        ?ReflectionClass $scope,
+        array &$names,
+    ): void {
         if ($type instanceof ReflectionNamedType) {
-            $names[] = self::resolveNamedTypeName($type, $scope, false);
+            $names[] = self::resolveNamedTypeName($type, $scope, requireContext: false);
             return;
         }
 
@@ -295,8 +438,12 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    private static function resolveNamedTypeName(ReflectionNamedType $type, ?ReflectionClass $scope, bool $requireContext): string
-    {
+    /** @param ReflectionClass<object>|null $scope */
+    private static function resolveNamedTypeName(
+        ReflectionNamedType $type,
+        ?ReflectionClass $scope,
+        bool $requireContext,
+    ): string {
         $name = $type->getName();
         if ($name !== 'self' && $name !== 'parent' && $name !== 'static') {
             return $name;
@@ -304,7 +451,10 @@ final class ReflectionType
 
         if ($scope === null) {
             if ($requireContext) {
-                throw new InvalidArgumentException(sprintf('Type "%s" requires declaring class context.', $name));
+                throw new InvalidArgumentException(sprintf(
+                    'Type "%s" requires declaring class context.',
+                    $name,
+                ));
             }
 
             return $name;
@@ -325,6 +475,10 @@ final class ReflectionType
         return $parent->getName();
     }
 
+    /**
+     * @param ReflectionClass<object>|class-string|null $scope
+     * @return ReflectionClass<object>|null
+     */
     private static function normalizeScope(ReflectionClass|string|null $scope): ?ReflectionClass
     {
         if ($scope === null || $scope instanceof ReflectionClass) {

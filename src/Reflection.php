@@ -107,6 +107,8 @@ final class Reflection
 
     /**
      * Reflects a supported value, or returns null when no reflector can be produced.
+     *
+     * @return ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionObject<object>|null
      */
     public static function reflect(mixed $var): ReflectionFunctionAbstract|ReflectionClass|ReflectionObject|null
     {
@@ -149,9 +151,19 @@ final class Reflection
 
         if (is_array($callable)) {
             [$objectOrClass, $method] = $callable;
-            $class = is_object($objectOrClass) ? $objectOrClass::class : $objectOrClass;
+            if (is_object($objectOrClass)) {
+                $class = $objectOrClass::class;
+            } elseif (is_string($objectOrClass)) {
+                $class = $objectOrClass;
+            } else {
+                throw new \LogicException('Callable method owner must be an object or class name.');
+            }
 
             return self::method($class, (string) $method);
+        }
+
+        if (!is_object($callable)) {
+            throw new \LogicException('Unsupported callable representation.');
         }
 
         return self::method($callable::class, '__invoke');
@@ -159,6 +171,8 @@ final class Reflection
 
     /**
      * Returns a cached reflector for an object without keeping that object alive.
+     *
+     * @return ReflectionObject<object>
      */
     public static function object(object $object): ReflectionObject
     {
@@ -175,6 +189,8 @@ final class Reflection
      *
      * Only a missing/invalid reflected class is converted to null. Exceptions raised
      * by an autoloader propagate so the original application failure is not hidden.
+     *
+     * @return ReflectionClass<object>|null
      */
     public static function class(string $class): ?ReflectionClass
     {
@@ -184,6 +200,7 @@ final class Reflection
         }
 
         try {
+            /** @var class-string $class */
             return self::$classes[$key] = new ReflectionClass($class);
         } catch (ReflectionException) {
             return null;
@@ -382,7 +399,7 @@ final class Reflection
         ?string $name,
     ): void {
         $metadata = self::getMetadata($reflector, $name);
-        if ($metadata !== null) {
+        if ($metada !== null) {
             $result[$path] = $metadata;
         }
     }
