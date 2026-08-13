@@ -81,9 +81,13 @@ final class ReflectionType
      * @return list<string>
      */
     public static function getTypeNames(
-        NativeReflectionType $type,
+        ?NativeReflectionType $type,
         ReflectionClass|string|null $scope = null,
     ): array {
+        if ($type === null) {
+            return [];
+        }
+
         $names = [];
         self::collectTypeNames($type, self::normalizeScope($scope), $names);
 
@@ -488,7 +492,13 @@ final class ReflectionType
         array &$names,
     ): void {
         if ($type instanceof ReflectionNamedType) {
-            $names[] = self::resolveNamedTypeName($type, $scope, requireContext: false);
+            $name = self::resolveNamedTypeName($type, $scope, requireContext: false);
+            $names[] = $name;
+
+            if ($type->allowsNull() && $name !== 'mixed' && $name !== 'null') {
+                $names[] = 'null';
+            }
+
             return;
         }
 
@@ -522,6 +532,14 @@ final class ReflectionType
             }
 
             return $name;
+        }
+
+        if ($scope->isTrait()) {
+            throw new InvalidArgumentException(sprintf(
+                'Type "%s" cannot be resolved from trait %s without the consuming class context.',
+                $name,
+                $scope->getName(),
+            ));
         }
 
         if ($name === 'self' || $name === 'static') {
