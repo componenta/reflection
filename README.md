@@ -27,6 +27,8 @@ $method = Reflection::callable([App\Service\UserService::class, 'handle']);
 
 `Reflection::reflect()` accepts mixed input and returns the corresponding native reflector when the value is supported, or `null` otherwise.
 
+`Reflection::callable()` reflects concrete functions, methods and invokable objects. A PHP callable that exists only through `__call()` or `__callStatic()` has no concrete method declaration whose signature can be reflected reliably; `Reflection::callable()` rejects that case with `InvalidArgumentException`, while the generic `Reflection::reflect()` returns `null`.
+
 `Reflection::class()` supports classes, interfaces, traits and enums. It returns `null` when the class-like symbol cannot be reflected. A negative lookup invokes the autoloader once; exceptions raised by that autoloader are not swallowed.
 
 ## Reading attributes
@@ -41,7 +43,7 @@ $hasPolicy = Reflection::hasMetadata($class, PermissionPolicy::class);
 
 `getMetadata()` returns `list<object>|null`. Attribute definitions are cached, but attribute instances are created fresh for each read. `hasMetadata()` and `hasDeepMetadata()` only check definitions and do not execute attribute constructors.
 
-Supported reflectors include functions/methods, classes, parameters, properties and `ReflectionClassConstant`.
+Supported reflectors include functions/methods, classes, parameters, properties, `ReflectionClassConstant`, and `ReflectionConstant`. Global-constant attributes and `ReflectionConstant::getAttributes()` are available starting with PHP 8.5; on PHP 8.4 a `ReflectionConstant` safely behaves as having no attributes.
 
 ## Deep attribute lookup
 
@@ -113,4 +115,4 @@ This clears class/function/method caches and resets the weak object, closure and
 composer check
 ```
 
-The test suite uses Pest 4. Static analysis runs with PHPStan at maximum level. CI covers PHP 8.4 and 8.5.
+The test suite uses Pest 4. Static analysis runs with PHPStan at maximum level. CI covers PHP 8.4 and 8.5, including a PHP 8.5-only smoke test for attributed global constants.
