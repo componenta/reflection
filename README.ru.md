@@ -25,9 +25,11 @@ $closure = Reflection::callable(static fn (): string => 'ok');
 $method = Reflection::callable([App\Service\UserService::class, 'handle']);
 ```
 
-`Reflection::reflect()` принимает mixed input и возвращает соответствующий native reflector либо `null`, если значение не поддерживается.
+`Reflection::reflect()` принимает mixed input и возвращает соответствующий native reflector либо `null`, если значение нельзя корректно отразить.
 
-`Reflection::class()` поддерживает classes, interfaces, traits и enums. Если class-like symbol нельзя отразить, возвращается `null`. При отрицательном lookup autoloader вызывается один раз; исключения, выброшенные autoloader-ом, не скрываются.
+`Reflection::callable()` отражает конкретные functions, methods и invokable objects. PHP-callable, существующий только за счёт `__call()` или `__callStatic()`, не имеет конкретного method declaration с достоверной сигнатурой; поэтому `Reflection::callable()` отклоняет такой случай через `InvalidArgumentException`, а универсальный `Reflection::reflect()` возвращает `null`.
+
+`Reflection::class()` поддерживает classes, interfaces, traits и enums. Для отсутствующего class-like symbol возвращается `null`. При отрицательном lookup autoloader вызывается один раз; исключения из autoloader не подавляются.
 
 ## Чтение attributes
 
@@ -41,7 +43,7 @@ $hasPolicy = Reflection::hasMetadata($class, PermissionPolicy::class);
 
 `getMetadata()` возвращает `list<object>|null`. Кешируются definitions attributes, но их экземпляры создаются заново при каждом чтении. `hasMetadata()` и `hasDeepMetadata()` проверяют только definitions и не вызывают constructors attributes.
 
-Поддерживаются functions/methods, classes, parameters, properties и `ReflectionClassConstant`.
+Поддерживаются functions/methods, classes, parameters, properties, `ReflectionClassConstant` и `ReflectionConstant`. Attributes глобальных constants и `ReflectionConstant::getAttributes()` доступны начиная с PHP 8.5; на PHP 8.4 `ReflectionConstant` безопасно ведёт себя как reflector без attributes.
 
 ## Deep attribute lookup
 
@@ -76,14 +78,14 @@ ReflectionType::getTypeNames($type);
 ReflectionType::toString($type);
 ```
 
-Native Reflection по-разному представляет некоторые relative type names в PHP 8.4 и 8.5. Если отражённый type всё ещё возвращается как `self`, `parent` или `static`, передавайте явный resolution `scope`. Для `self` и `parent` это обычно declaring class. Для `static`, когда различие важно, нужно передавать effective late-static class.
+Native Reflection по-разному представляет некоторые relative type names в PHP 8.4 и 8.5. Если тип всё ещё возвращается как `self`, `parent` или `static`, передавайте явный `scope`. Для `self` и `parent` обычно это declaring class; для `static` — фактический late-static class, когда это различие существенно.
 
 ```php
 ReflectionType::match($type, $value, scope: $declaringClass);
 ReflectionType::getTypeNames($type, scope: $declaringClass);
 ```
 
-Если native Reflection уже вернул конкретное имя класса, дополнительный `scope` для этого имени не требуется.
+Если native Reflection уже возвращает конкретное имя класса, `scope` для него не нужен.
 
 ### Простое PHP-level coercion
 
@@ -95,7 +97,7 @@ if (ReflectionType::canCoerce($type, $value)) {
 }
 ```
 
-Контракт строгий: если `canCoerce()` вернул `false`, `coerce()` отклонит то же преобразование. Union coercion намеренно консервативнее weak parameter coercion PHP: уже подходящий branch сохраняется, а преобразование выполняется только когда coercible ровно один branch. Если возможны несколько target types, преобразование отклоняется вместо применения PHP scalar-union preference order.
+Контракт строгий: если `canCoerce()` вернул `false`, `coerce()` отклонит то же преобразование. Для union coercion сохраняется уже подходящий branch, а преобразование выполняется только если возможен ровно один target. Если подходят несколько targets, преобразование отклоняется вместо применения внутреннего порядка предпочтений weak scalar coercion PHP.
 
 В array можно преобразовать array, iterable и `Componenta\Arrayable\Arrayable`. Произвольные scalars больше не оборачиваются молча в одноэлементный array.
 
@@ -113,4 +115,4 @@ Reflection::clearReflectors();
 composer check
 ```
 
-Тесты написаны на Pest 4. Статический анализ выполняется PHPStan на максимальном уровне. CI проверяет PHP 8.4 и 8.5.
+Тесты написаны на Pest 4. Статический анализ выполняется PHPStan на максимальном уровне. CI проверяет PHP 8.4 и 8.5, включая отдельный PHP 8.5-only smoke test для attributed global constants.
