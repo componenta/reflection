@@ -27,7 +27,7 @@ $method = Reflection::callable([App\Service\UserService::class, 'handle']);
 
 `Reflection::reflect()` accepts mixed input and returns the corresponding native reflector when the value is supported, or `null` otherwise.
 
-`Reflection::class()` returns `null` when the class cannot be reflected. Exceptions raised by an autoloader are not swallowed.
+`Reflection::class()` supports classes, interfaces, traits and enums. It returns `null` when the class-like symbol cannot be reflected. A negative lookup invokes the autoloader once; exceptions raised by that autoloader are not swallowed.
 
 ## Reading attributes
 
@@ -76,16 +76,18 @@ ReflectionType::getTypeNames($type);
 ReflectionType::toString($type);
 ```
 
-For `self`, `parent` or `static`, pass the declaring class as `scope`:
+Native Reflection changed how some relative type names are exposed between PHP 8.4 and 8.5. When a reflected type is still reported as `self`, `parent` or `static`, pass an explicit resolution `scope`. For `self` and `parent` this is normally the declaring class. For `static`, pass the effective late-static class when that distinction matters.
 
 ```php
 ReflectionType::match($type, $value, scope: $declaringClass);
 ReflectionType::getTypeNames($type, scope: $declaringClass);
 ```
 
+If native Reflection already reports a concrete class name, `scope` is not needed for that name.
+
 ### Simple PHP-level coercion
 
-`canCoerce()` and `coerce()` are intentionally kept in this package. They answer whether a value can be converted to the reflected **native PHP type** and perform that conversion. They are not a replacement for `componenta/caster`, which owns named/domain-specific conversion pipelines.
+`canCoerce()` and `coerce()` are intentionally kept in this package. They provide conservative, explicit conversions to reflected **native PHP types**. They are not a replacement for `componenta/caster`, which owns named/domain-specific conversion pipelines.
 
 ```php
 if (ReflectionType::canCoerce($type, $value)) {
@@ -93,7 +95,7 @@ if (ReflectionType::canCoerce($type, $value)) {
 }
 ```
 
-The contract is strict: when `canCoerce()` returns `false`, `coerce()` rejects the same conversion. Union coercion is performed only when the value already matches a branch or exactly one branch is coercible; ambiguous conversions are rejected.
+The contract is strict: when `canCoerce()` returns `false`, the same conversion is rejected by `coerce()`. Union coercion is intentionally more conservative than PHP's weak parameter coercion: an already matching branch is preserved, and otherwise conversion is performed only when exactly one branch is coercible. Multiple possible conversion targets are rejected instead of applying PHP's scalar-union preference order.
 
 Arrays are accepted from arrays, iterables and `Componenta\Arrayable\Arrayable`. Arbitrary scalars are not silently wrapped into one-element arrays.
 
