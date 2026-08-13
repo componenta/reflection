@@ -4,9 +4,19 @@
 
 ## Установка
 
+Этот README описывает **ещё не выпущенный API v2, который сейчас находится в `main`**. Последний опубликованный стабильный релиз пока относится к v1.x, поэтому для проверки API, описанного ниже, development-ветку нужно указать явно:
+
 ```bash
-composer require componenta/reflection
+composer require componenta/reflection:dev-main
 ```
+
+Для установки последнего опубликованного релиза v1 используйте:
+
+```bash
+composer require componenta/reflection:^1.0
+```
+
+API v1 отличается от API, описанного в README ветки `main`.
 
 ## Требования
 
