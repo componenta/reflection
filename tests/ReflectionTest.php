@@ -13,7 +13,7 @@ use ReflectionObject;
 use RuntimeException;
 use WeakReference;
 
-beforeEach(static function (): void {
+beforeEach(function (): void {
     CountingAttribute::$constructed = 0;
 });
 
