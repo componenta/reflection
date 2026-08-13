@@ -75,15 +75,20 @@ $type = (new ReflectionParameter($callable, 'value'))->getType();
 ReflectionType::match($type, $value);
 ReflectionType::contains($type, SomeInterface::class);
 ReflectionType::getTypeNames($type);
-ReflectionType::toString($type);
 ```
 
-Native Reflection по-разному представляет некоторые relative type names в PHP 8.4 и 8.5. Если тип всё ещё возвращается как `self`, `parent` или `static`, передавайте явный `scope`. Для `self` и `parent` обычно это declaring class; для `static` — фактический late-static class, когда это различие существенно.
+`ReflectionParameter::getType()` может вернуть `null`, поэтому `getTypeNames(null)` возвращает пустой список. Nullable named declarations нормализуются семантически: например, `?int` даёт `['int', 'null']`, поэтому `contains($type, 'null')` согласован с nullable unions. Для `mixed` результат остаётся `['mixed']`, поскольку `mixed` уже включает `null` по смыслу.
+
+`toString()` требует настоящий `ReflectionType` и возвращает его native строковое представление PHP.
+
+Native Reflection по-разному представляет некоторые relative type names в PHP 8.4 и 8.5. Если тип всё ещё возвращается как `self`, `parent` или `static`, передавайте явный `scope`. Для обычных class declarations `self` и `parent` обычно разрешаются относительно declaring class; для `static` передавайте фактический late-static class, когда это различие существенно.
 
 ```php
 ReflectionType::match($type, $value, scope: $declaringClass);
 ReflectionType::getTypeNames($type, scope: $declaringClass);
 ```
+
+Сам trait не является корректным scope для relative type: `self`, `parent` и `static` внутри trait интерпретируются в consuming class. Отражайте метод через consuming class и передавайте этот class как `scope`; иначе helper завершится fail-fast вместо ошибочного разрешения relative type в имя trait.
 
 Если native Reflection уже возвращает конкретное имя класса, `scope` для него не нужен.
 
