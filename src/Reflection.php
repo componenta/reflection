@@ -135,6 +135,9 @@ final class Reflection
 
         if (is_array($callable)) {
             [$owner, $method] = $callable;
+            if ($owner instanceof Closure && strcasecmp((string) $method, '__invoke') === 0) {
+                return self::callable($owner);
+            }
             if (is_object($owner)) {
                 $class = $owner::class;
             } elseif (is_string($owner)) {
@@ -405,7 +408,7 @@ final class Reflection
 
     private static function classKey(string $class): string
     {
-        return strtolower(ltrim($class, '\\'));
+        return strtolower(str_starts_with($class, '\\') ? substr($class, 1) : $class);
     }
 
     private static function functionKey(string $function): string
