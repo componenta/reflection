@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Componenta\Reflection;
 
 use Closure;
+use Componenta\Reflection\Internal\CachedClassReflection;
+use Componenta\Reflection\Internal\CachedFunctionReflection;
+use Componenta\Reflection\Internal\CachedMethodReflection;
+use Componenta\Reflection\Internal\CachedObjectReflection;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionClassConstant;
@@ -17,6 +21,7 @@ use ReflectionParameter;
 use ReflectionProperty;
 use Reflector;
 use WeakMap;
+use WeakReference;
 
 final class Reflection
 {
@@ -29,10 +34,10 @@ final class Reflection
     /** @var array<string, ReflectionMethod> */
     private static array $methods = [];
 
-    /** @var WeakMap<Closure, ReflectionFunction>|null */
+    /** @var WeakMap<Closure, WeakReference<ReflectionFunction>>|null */
     private static ?WeakMap $closures = null;
 
-    /** @var WeakMap<object, ReflectionObject<object>>|null */
+    /** @var WeakMap<object, WeakReference<ReflectionObject<object>>>|null */
     private static ?WeakMap $objects = null;
 
     /** @var WeakMap<Reflector, array<string, list<ReflectionAttribute<object>>|null>>|null */
@@ -117,26 +122,35 @@ final class Reflection
     {
         if ($callable instanceof Closure) {
             $cache = self::$closures ??= new WeakMap();
-
-            return $cache[$callable] ??= new ReflectionFunction($callable);
+            $reflection = ($cache[$callable] ?? null)?->get();
+            if ($reflection === null) {
+                $reflection = new CachedFunctionReflection($callable);
+                $cache[$callable] = WeakReference::create($reflection);
+            }
+            return $reflection;
         }
 
         if (is_string($callable)) {
-            if (str_contains($callable, '::')) {
-                [$class, $method] = explode('::', $callable, 2);
+            $separator = strrpos($callable, '::');
+            if ($separator !== false) {
+                $class = substr($callable, 0, $separator);
+                $method = substr($callable, $separator + 2);
 
                 return self::concreteMethod($class, $method, true);
             }
 
             $key = self::functionKey($callable);
 
-            return self::$functions[$key] ??= new ReflectionFunction($callable);
+            return self::$functions[$key] ??= new CachedFunctionReflection($callable);
         }
 
         if (is_array($callable)) {
             [$owner, $method] = $callable;
             if ($owner instanceof Closure && strcasecmp((string) $method, '__invoke') === 0) {
                 return self::callable($owner);
+            }
+            if (str_contains((string) $method, '::')) {
+                return self::qualifiedMethod($callable, is_string($owner));
             }
             if (is_object($owner)) {
                 $class = $owner::class;
@@ -160,8 +174,12 @@ final class Reflection
     public static function object(object $object): ReflectionObject
     {
         $cache = self::$objects ??= new WeakMap();
-
-        return $cache[$object] ??= new ReflectionObject($object);
+        $reflection = ($cache[$object] ?? null)?->get();
+        if ($reflection === null) {
+            $reflection = new CachedObjectReflection($object);
+            $cache[$object] = WeakReference::create($reflection);
+        }
+        return $reflection;
     }
 
     /** @return ReflectionClass<object>|null */
@@ -181,7 +199,8 @@ final class Reflection
         }
 
         /** @var class-string $class */
-        return self::$classes[$key] = new ReflectionClass($class);
+        $reflection = new CachedClassReflection($class);
+        return self::$classes[$key] ??= $reflection;
     }
 
     /**
@@ -314,6 +333,15 @@ final class Reflection
         ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector,
         ?string $name,
     ): ?array {
+        if (!$reflector instanceof CachedClassReflection
+            && !$reflector instanceof CachedFunctionReflection
+            && !$reflector instanceof CachedMethodReflection
+            && !$reflector instanceof CachedObjectReflection
+        ) {
+            $definitions = self::attributeDefinitions($reflector, $name);
+            return $definitions === [] ? null : $definitions;
+        }
+
         $cache = self::$metadata ??= new WeakMap();
         $key = $name === null ? 'all' : 'name:' . strtolower($name);
         $byName = $cache[$reflector] ?? [];
@@ -399,11 +427,23 @@ final class Reflection
         return $reflection;
     }
 
+    private static function qualifiedMethod(callable $callable, bool $staticOwner): ReflectionFunction
+    {
+        // Native capture preserves which ancestor and called scope PHP selected.
+        $reflection = new CachedFunctionReflection(Closure::fromCallable($callable));
+        $scope = $reflection->getClosureScopeClass();
+        if ($scope === null) {
+            throw new \InvalidArgumentException('Qualified callable has no concrete method to reflect.');
+        }
+        self::concreteMethod($scope->getName(), $reflection->getName(), $staticOwner);
+        return $reflection;
+    }
+
     private static function method(string $class, string $method): ReflectionMethod
     {
         $key = self::classKey($class) . '::' . strtolower($method);
 
-        return self::$methods[$key] ??= new ReflectionMethod($class, $method);
+        return self::$methods[$key] ??= new CachedMethodReflection($class, $method);
     }
 
     private static function classKey(string $class): string

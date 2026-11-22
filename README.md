@@ -23,6 +23,8 @@ $method = Reflection::callable([App\Service\UserService::class, 'handle']);
 
 `Reflection::callable()` supports functions, closures, concrete methods and invokable objects. Callables resolved only through `__call()` or `__callStatic()` are rejected because they have no concrete method signature to reflect.
 
+Qualified ancestor callables return a `ReflectionFunction` for the native capture, retaining PHP's selected declaration and called class.
+
 `Reflection::reflect()` accepts mixed input and returns the corresponding native reflector or `null` when the value cannot be reflected reliably.
 
 ## Attributes
@@ -35,7 +37,7 @@ $first = Reflection::getFirstMetadata($class, PermissionPolicy::class);
 $has = Reflection::hasMetadata($class, PermissionPolicy::class);
 ```
 
-Attribute definitions are cached, while attribute instances are created fresh for each read. `hasMetadata()` does not instantiate attributes.
+Attribute definitions are cached for reflectors supplied by this library. For a caller-supplied reflector, metadata follows its current declaration. Attribute instances are created fresh for each read. `hasMetadata()` does not instantiate attributes.
 
 Supported reflectors include functions, methods, classes, parameters, properties, class constants and global constants. Global constant attributes are available on PHP 8.5+.
 
@@ -102,7 +104,8 @@ Arrays can be produced from arrays, iterables and `Componenta\Arrayable\Arrayabl
 Reflection::clearReflectors();
 ```
 
-Class, function and method reflectors are cached strongly. Object and closure reflectors use `WeakMap` and do not extend application object lifetime.
+Class, function and method reflectors are cached strongly. Object and closure reflectors are cached weakly and reused while a caller holds the reflector. The cache itself adds no strong reference to the reflector or its subject.
+Cached handles are subclasses of the native reflector types. Calling `__construct()` again on a cached handle throws `LogicException`.
 
 ## Development
 
