@@ -101,6 +101,7 @@ Coercion is limited to reflected PHP types. Union coercion succeeds only when th
 Integer coercion truncates finite values toward zero after checking the platform integer range. Decimal and scientific strings are checked and converted without rounding through a float.
 
 Arrays can be produced from arrays, iterables and `Componenta\Arrayable\Arrayable` values. Scalars are not wrapped into one-element arrays.
+`canCoerce()` checks iterable eligibility before iteration begins. `coerce()` uses PHP's array key rules and reports invalid keys with `InvalidArgumentException`.
 
 ## Cache management
 

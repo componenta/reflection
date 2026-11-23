@@ -12,6 +12,7 @@ use ReflectionNamedType;
 use ReflectionType as NativeReflectionType;
 use ReflectionUnionType;
 use Stringable;
+use TypeError;
 
 /**
  * Utilities for inspecting, matching and performing simple native PHP type coercion.
@@ -42,7 +43,8 @@ final class ReflectionType
     }
 
     /**
-     * Checks whether coerce() can perform one unambiguous PHP-level conversion.
+     * Checks eligibility for an unambiguous PHP-level conversion.
+     * Iterable keys are validated when coerce() traverses the input.
      *
      * @param ReflectionClass<object>|class-string|null $scope
      */
@@ -452,7 +454,15 @@ final class ReflectionType
         }
 
         if (is_iterable($value)) {
-            return iterator_to_array($value);
+            try {
+                return iterator_to_array($value);
+            } catch (TypeError $error) {
+                if ($error->getFile() !== __FILE__ || ($error->getTrace()[0]['function'] ?? null) !== 'iterator_to_array') {
+                    throw $error;
+                }
+
+                throw new InvalidArgumentException('Cannot coerce iterable with an invalid array key.', previous: $error);
+            }
         }
 
         throw new InvalidArgumentException(sprintf(

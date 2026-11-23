@@ -6,14 +6,66 @@ namespace Componenta\Reflection\Tests;
 
 use Componenta\Reflection\ReflectionType;
 use ErrorException;
+use Generator;
 use InvalidArgumentException;
 use ReflectionFunction;
+use stdClass;
+use TypeError;
 
 function intReflectionType(): \ReflectionType
 {
     return (new ReflectionFunction(static fn (int $value) => null))->getParameters()[0]->getType()
         ?? throw new \LogicException('Expected reflected int type.');
 }
+
+function arrayReflectionType(): \ReflectionType
+{
+    return (new ReflectionFunction(static fn (array $value) => null))->getParameters()[0]->getType()
+        ?? throw new \LogicException('Expected reflected array type.');
+}
+
+test('array coercion validates iterable keys during conversion', function (string $keyType): void {
+    $type = arrayReflectionType();
+    $iterator = (static function () use ($keyType): Generator {
+        yield ($keyType === 'object' ? new stdClass() : ['invalid']) => 'value';
+    })();
+
+    expect(ReflectionType::canCoerce($type, $iterator))->toBeTrue()
+        ->and(fn () => ReflectionType::coerce($type, $iterator))->toThrow(InvalidArgumentException::class, 'invalid array key');
+})->with(['object', 'array']);
+
+test('array conversion keeps native keys and checks iterable eligibility without iteration', function (): void {
+    $type = arrayReflectionType();
+    $traversals = 0;
+    $iterator = (static function () use (&$traversals): Generator {
+        ++$traversals;
+        yield 'label' => 'first';
+        yield 4 => 'second';
+    })();
+
+    expect(ReflectionType::canCoerce($type, $iterator))->toBeTrue()
+        ->and($traversals)->toBe(0)
+        ->and(ReflectionType::coerce($type, $iterator))->toBe(['label' => 'first', 4 => 'second'])
+        ->and($traversals)->toBe(1);
+});
+
+test('array coercion propagates TypeError from application iterators', function (): void {
+    $type = arrayReflectionType();
+    $failure = new TypeError('Cannot access offset of type stdClass on array');
+    $iterator = (static function () use ($failure): Generator {
+        yield 'valid' => 'value';
+        throw $failure;
+    })();
+
+    try {
+        ReflectionType::coerce($type, $iterator);
+    } catch (TypeError $error) {
+        expect($error)->toBe($failure);
+        return;
+    }
+
+    throw new \LogicException('Expected the application iterator failure.');
+});
 
 test('integer coercion rejects non-finite and overflowing numeric values', function (): void {
     $type = intReflectionType();
