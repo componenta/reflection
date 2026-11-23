@@ -123,7 +123,17 @@ final class ReflectionType
         ?ReflectionClass $scope,
     ): bool {
         if ($type instanceof ReflectionNamedType) {
-            return self::matchNamedType($type, $var, $strict, $scope);
+            if ($type->allowsNull() && $var === null) {
+                return true;
+            }
+
+            if ($type->isBuiltin()) {
+                return self::matchBuiltinType($type->getName(), $var, $strict);
+            }
+
+            $name = self::resolveNamedTypeName($type, $scope, requireContext: true);
+
+            return is_object($var) && $var instanceof $name;
         }
 
         if ($type instanceof ReflectionUnionType) {
@@ -147,26 +157,6 @@ final class ReflectionType
         }
 
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
-    }
-
-    /** @param ReflectionClass<covariant object>|null $scope */
-    private static function matchNamedType(
-        ReflectionNamedType $type,
-        mixed $var,
-        bool $strict,
-        ?ReflectionClass $scope,
-    ): bool {
-        if ($type->allowsNull() && $var === null) {
-            return true;
-        }
-
-        if ($type->isBuiltin()) {
-            return self::matchBuiltinType($type->getName(), $var, $strict);
-        }
-
-        $name = self::resolveNamedTypeName($type, $scope, requireContext: true);
-
-        return is_object($var) && $var instanceof $name;
     }
 
     private static function matchBuiltinType(string $typeName, mixed $var, bool $strict): bool
@@ -238,7 +228,7 @@ final class ReflectionType
         }
 
         if (!$type->isBuiltin()) {
-            return self::matchNamedType($type, $value, strict: true, scope: $scope);
+            return self::matchType($type, $value, strict: true, scope: $scope);
         }
 
         return match ($type->getName()) {
@@ -321,7 +311,7 @@ final class ReflectionType
         }
 
         if (!$type->isBuiltin()) {
-            if (self::matchNamedType($type, $value, strict: true, scope: $scope)) {
+            if (self::matchType($type, $value, strict: true, scope: $scope)) {
                 return $value;
             }
 
