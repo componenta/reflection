@@ -27,6 +27,8 @@ Qualified ancestor callables return a `ReflectionFunction` for the native captur
 
 `Reflection::reflect()` accepts mixed input and returns the corresponding native reflector or `null` when the value cannot be reflected reliably.
 
+Both methods select the owner and method of a callable array before validation can autoload application code. An abstract static dispatch route has no concrete reflector, so `reflect()` returns `null`.
+
 ## Attributes
 
 ```php

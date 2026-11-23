@@ -9,6 +9,7 @@ use Componenta\Reflection\Internal\CachedClassReflection;
 use Componenta\Reflection\Internal\CachedFunctionReflection;
 use Componenta\Reflection\Internal\CachedMethodReflection;
 use Componenta\Reflection\Internal\CachedObjectReflection;
+use Componenta\Reflection\Internal\NativeCallableInspection;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionClassConstant;
@@ -20,11 +21,14 @@ use ReflectionObject;
 use ReflectionParameter;
 use ReflectionProperty;
 use Reflector;
+use TypeError;
 use WeakMap;
 use WeakReference;
 
 final class Reflection
 {
+    use NativeCallableInspection;
+
     /** @var array<string, ReflectionClass<covariant object>> */
     private static array $classes = [];
 
@@ -95,9 +99,12 @@ final class Reflection
     /** @return ReflectionFunctionAbstract|ReflectionClass<covariant object>|null */
     public static function reflect(mixed $value): ReflectionFunctionAbstract|ReflectionClass|ReflectionObject|null
     {
-        if (is_callable($value)) {
+        if (is_array($value)) {
+            $value = self::snapshotCallableArray($value);
+        }
+        if (self::isNativeCallable($value)) {
             try {
-                return self::callable($value);
+                return self::reflectCallable($value);
             } catch (\InvalidArgumentException) {
                 return null;
             }
@@ -110,7 +117,24 @@ final class Reflection
         };
     }
 
-    public static function callable(callable $callable): ReflectionFunctionAbstract
+    /** @param callable $callable */
+    public static function callable(callable|array $callable): ReflectionFunctionAbstract
+    {
+        if (is_array($callable)) {
+            $callable = self::snapshotCallableArray($callable);
+            if (!is_callable($callable)) {
+                throw new TypeError(sprintf(
+                    '%s(): Argument #1 ($callable) must be of type callable, array given.',
+                    __METHOD__,
+                ));
+            }
+        }
+
+        return self::reflectCallable($callable);
+    }
+
+    /** @param callable $callable */
+    private static function reflectCallable(mixed $callable): ReflectionFunctionAbstract
     {
         if ($callable instanceof Closure) {
             return self::closure($callable);
@@ -133,7 +157,7 @@ final class Reflection
         if (is_array($callable)) {
             [$owner, $method] = $callable;
             if ($owner instanceof Closure && strcasecmp((string) $method, '__invoke') === 0) {
-                return self::callable($owner);
+                return self::closure($owner);
             }
             if (str_contains((string) $method, '::')) {
                 return self::qualifiedMethod($callable, is_string($owner));
@@ -154,6 +178,20 @@ final class Reflection
         }
 
         return self::method($callable::class, '__invoke');
+    }
+
+    /**
+     * @param array<array-key, mixed> $callable
+     * @return array<array-key, mixed>
+     */
+    private static function snapshotCallableArray(array $callable): array
+    {
+        if (count($callable) !== 2 || !isset($callable[0], $callable[1])) {
+            return $callable;
+        }
+
+        // Own the routing slots before callable validation can load a class.
+        return [$callable[0], $callable[1]];
     }
 
     /**

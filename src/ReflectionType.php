@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Reflection;
 
 use Componenta\Arrayable\Arrayable;
+use Componenta\Reflection\Internal\NativeCallableInspection;
 use InvalidArgumentException;
 use ReflectionClass;
 use ReflectionIntersectionType;
@@ -22,6 +23,8 @@ use TypeError;
  */
 final class ReflectionType
 {
+    use NativeCallableInspection;
+
     /**
      * Checks whether a value matches a reflected PHP type.
      *
@@ -178,7 +181,7 @@ final class ReflectionType
             'string' => $strict ? is_string($var) : is_string($var) || $var instanceof Stringable,
             'false' => $var === false,
             'true' => $var === true,
-            'callable' => is_callable($var),
+            'callable' => self::isNativeCallable($var),
             'iterable' => is_iterable($var),
             'resource' => is_resource($var),
             'never', 'void' => false,
@@ -249,7 +252,7 @@ final class ReflectionType
             'array' => is_array($value) || is_iterable($value) || $value instanceof Arrayable,
             'object' => is_object($value) || is_array($value),
             'iterable' => is_iterable($value),
-            'callable' => is_callable($value),
+            'callable' => self::isNativeCallable($value),
             'null', 'false', 'true', 'resource' => self::matchBuiltinType($type->getName(), $value, strict: true),
             'never', 'void' => false,
             default => self::matchBuiltinType($type->getName(), $value, strict: true),
