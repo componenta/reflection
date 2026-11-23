@@ -98,7 +98,7 @@ if (ReflectionType::canCoerce($type, $value)) {
 }
 ```
 
-Coercion is limited to reflected PHP types. Union coercion succeeds only when the value already matches a branch or exactly one branch is coercible; ambiguous conversions are rejected.
+Coercion is limited to reflected PHP types. Union coercion succeeds only when the value already matches a branch or exactly one branch is coercible. Ambiguous conversions are rejected. Union checks accept a matching ordinary member before trying callable resolution.
 
 Integer coercion truncates finite values toward zero after checking the platform integer range. Decimal and scientific strings are checked and converted without rounding through a float.
 
