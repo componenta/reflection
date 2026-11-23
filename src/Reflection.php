@@ -29,6 +29,8 @@ final class Reflection
 {
     use NativeCallableInspection;
 
+    private const int METADATA_MISS_CACHE_LIMIT = 16;
+
     /** @var array<string, ReflectionClass<covariant object>> */
     private static array $classes = [];
 
@@ -462,6 +464,10 @@ final class Reflection
         }
 
         $definitions = self::attributeDefinitions($reflector, $name);
+        if ($definitions === [] && $name !== null && count($byName) >= self::METADATA_MISS_CACHE_LIMIT) {
+            // Only observed definitions and a bounded set of misses belong in this cache.
+            return null;
+        }
         $byName[$key] = $definitions === [] ? null : $definitions;
         $cache[$reflector] = $byName;
 

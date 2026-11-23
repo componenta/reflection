@@ -20,6 +20,9 @@ final class EdgeAttribute {}
 #[EdgeAttribute]
 final class EdgeAnnotatedClass {}
 
+#[EdgeAttribute]
+final class FilteredCacheTarget {}
+
 #[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD | Attribute::TARGET_PROPERTY)]
 final class RetargetingMetadata
 {
@@ -247,6 +250,25 @@ test('class reflection reuses an instance published by its own autoloader', func
     expect($outside?->getName())->toBe(EdgeAnnotatedClass::class)
         ->and($outside)->toBe($inside)
         ->and(Reflection::class(strtolower($target)))->toBe($outside);
+});
+
+test('declared metadata remains available after many distinct named misses', function (): void {
+    $reflector = Reflection::class(FilteredCacheTarget::class)
+        ?? throw new \LogicException('Expected the metadata cache fixture.');
+    for ($index = 0; $index < 24; ++$index) {
+        $alias = __NAMESPACE__ . '\\FilteredCacheAlias' . $index;
+        class_alias(EdgeAttribute::class, $alias, autoload: false);
+        expect($reflector->getAttributes($alias))->toBe([])
+            ->and(Reflection::hasMetadata($reflector, $alias))->toBeFalse();
+    }
+
+    $first = Reflection::getFirstMetadata($reflector, EdgeAttribute::class);
+    $second = Reflection::getFirstMetadata($reflector, EdgeAttribute::class);
+    expect($first)->toBeInstanceOf(EdgeAttribute::class)
+        ->and($second)->toBeInstanceOf(EdgeAttribute::class)
+        ->and($second)->not->toBe($first)
+        ->and(Reflection::getMetadata($reflector))->toHaveCount(1)
+        ->and(Reflection::hasMetadata($reflector, strtolower(EdgeAttribute::class)))->toBeTrue();
 });
 
 test('metadata cache separates unfiltered and empty-name lookups', function (): void {
