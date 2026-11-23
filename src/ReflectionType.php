@@ -27,7 +27,7 @@ final class ReflectionType
      *
      * Supply $scope when the reflected type may contain self, parent or static.
      *
-     * @param ReflectionClass<object>|class-string|null $scope
+     * @param ReflectionClass<covariant object>|class-string|null $scope
      */
     public static function match(
         ?NativeReflectionType $type,
@@ -46,7 +46,7 @@ final class ReflectionType
      * Checks eligibility for an unambiguous PHP-level conversion.
      * Iterable keys are validated when coerce() traverses the input.
      *
-     * @param ReflectionClass<object>|class-string|null $scope
+     * @param ReflectionClass<covariant object>|class-string|null $scope
      */
     public static function canCoerce(
         NativeReflectionType $type,
@@ -62,7 +62,7 @@ final class ReflectionType
      * Union coercion is allowed only when the value already matches one branch or
      * exactly one branch is coercible. Ambiguous conversions are rejected.
      *
-     * @param ReflectionClass<object>|class-string|null $scope
+     * @param ReflectionClass<covariant object>|class-string|null $scope
      * @throws InvalidArgumentException When the conversion is impossible or ambiguous.
      */
     public static function coerce(
@@ -79,7 +79,7 @@ final class ReflectionType
     }
 
     /**
-     * @param ReflectionClass<object>|class-string|null $scope
+     * @param ReflectionClass<covariant object>|class-string|null $scope
      * @return list<string>
      */
     public static function getTypeNames(
@@ -96,7 +96,7 @@ final class ReflectionType
         return array_values(array_unique($names));
     }
 
-    /** @param ReflectionClass<object>|class-string|null $scope */
+    /** @param ReflectionClass<covariant object>|class-string|null $scope */
     public static function contains(
         ?NativeReflectionType $type,
         string $typeName,
@@ -115,7 +115,7 @@ final class ReflectionType
         return false;
     }
 
-    /** @param ReflectionClass<object>|null $scope */
+    /** @param ReflectionClass<covariant object>|null $scope */
     private static function matchType(
         NativeReflectionType $type,
         mixed $var,
@@ -149,7 +149,7 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    /** @param ReflectionClass<object>|null $scope */
+    /** @param ReflectionClass<covariant object>|null $scope */
     private static function matchNamedType(
         ReflectionNamedType $type,
         mixed $var,
@@ -190,7 +190,7 @@ final class ReflectionType
         };
     }
 
-    /** @param ReflectionClass<object>|null $scope */
+    /** @param ReflectionClass<covariant object>|null $scope */
     private static function canCoerceType(
         NativeReflectionType $type,
         mixed $value,
@@ -227,7 +227,7 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    /** @param ReflectionClass<object>|null $scope */
+    /** @param ReflectionClass<covariant object>|null $scope */
     private static function canCoerceNamedType(
         ReflectionNamedType $type,
         mixed $value,
@@ -260,7 +260,7 @@ final class ReflectionType
         };
     }
 
-    /** @param ReflectionClass<object>|null $scope */
+    /** @param ReflectionClass<covariant object>|null $scope */
     private static function coerceType(
         NativeReflectionType $type,
         mixed $value,
@@ -310,7 +310,7 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    /** @param ReflectionClass<object>|null $scope */
+    /** @param ReflectionClass<covariant object>|null $scope */
     private static function coerceNamedType(
         ReflectionNamedType $type,
         mixed $value,
@@ -472,7 +472,7 @@ final class ReflectionType
     }
 
     /**
-     * @param ReflectionClass<object>|null $scope
+     * @param ReflectionClass<covariant object>|null $scope
      * @param list<string> $names
      */
     private static function collectTypeNames(
@@ -501,7 +501,7 @@ final class ReflectionType
         throw new InvalidArgumentException(sprintf('Unsupported type: %s', $type::class));
     }
 
-    /** @param ReflectionClass<object>|null $scope */
+    /** @param ReflectionClass<covariant object>|null $scope */
     private static function resolveNamedTypeName(
         ReflectionNamedType $type,
         ?ReflectionClass $scope,
@@ -547,8 +547,8 @@ final class ReflectionType
     }
 
     /**
-     * @param ReflectionClass<object>|class-string|null $scope
-     * @return ReflectionClass<object>|null
+     * @param ReflectionClass<covariant object>|class-string|null $scope
+     * @return ReflectionClass<covariant object>|null
      */
     private static function normalizeScope(ReflectionClass|string|null $scope): ?ReflectionClass
     {

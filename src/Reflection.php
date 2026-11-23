@@ -25,7 +25,7 @@ use WeakReference;
 
 final class Reflection
 {
-    /** @var array<string, ReflectionClass<object>> */
+    /** @var array<string, ReflectionClass<covariant object>> */
     private static array $classes = [];
 
     /** @var array<string, ReflectionFunction> */
@@ -37,7 +37,7 @@ final class Reflection
     /** @var WeakMap<Closure, WeakReference<ReflectionFunction>>|null */
     private static ?WeakMap $closures = null;
 
-    /** @var WeakMap<object, WeakReference<ReflectionObject<object>>>|null */
+    /** @var WeakMap<object, WeakReference<ReflectionObject<covariant object>>>|null */
     private static ?WeakMap $objects = null;
 
     /** @var WeakMap<Reflector, array<string, list<ReflectionAttribute<object>>|null>>|null */
@@ -92,7 +92,7 @@ final class Reflection
         return self::metadataDefinitions($reflector, $name) !== null;
     }
 
-    /** @return ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionObject<object>|null */
+    /** @return ReflectionFunctionAbstract|ReflectionClass<covariant object>|null */
     public static function reflect(mixed $value): ReflectionFunctionAbstract|ReflectionClass|ReflectionObject|null
     {
         if (is_callable($value)) {
@@ -156,10 +156,15 @@ final class Reflection
         return self::method($callable::class, '__invoke');
     }
 
-    /** @return ReflectionObject<object> */
+    /**
+     * @template T of object
+     * @param T $object
+     * @return ReflectionObject<T>
+     */
     public static function object(object $object): ReflectionObject
     {
         $cache = self::$objects ??= new WeakMap();
+        /** @var ReflectionObject<T>|null $reflection */
         $reflection = ($cache[$object] ?? null)?->get();
         if ($reflection === null) {
             $reflection = new CachedObjectReflection($object);
@@ -168,11 +173,16 @@ final class Reflection
         return $reflection;
     }
 
-    /** @return ReflectionClass<object>|null */
+    /**
+     * @template T of string
+     * @param T $class
+     * @return ReflectionClass<new<T>>|null
+     */
     public static function class(string $class): ?ReflectionClass
     {
         $key = self::classKey($class);
         if (isset(self::$classes[$key])) {
+            /** @var ReflectionClass<new<T>> */
             return self::$classes[$key];
         }
 
@@ -184,8 +194,9 @@ final class Reflection
             return null;
         }
 
-        /** @var class-string $class */
+        /** @var class-string<new<T>> $class */
         $reflection = new CachedClassReflection($class);
+        /** @var ReflectionClass<new<T>> */
         return self::$classes[$key] ??= $reflection;
     }
 
