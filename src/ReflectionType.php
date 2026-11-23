@@ -137,13 +137,19 @@ final class ReflectionType
         }
 
         if ($type instanceof ReflectionUnionType) {
+            $hasCallable = false;
             foreach ($type->getTypes() as $subType) {
+                // A matching ordinary member needs no callable lookup or autoload.
+                if ($subType instanceof ReflectionNamedType && $subType->getName() === 'callable') {
+                    $hasCallable = true;
+                    continue;
+                }
                 if (self::matchType($subType, $var, $strict, $scope)) {
                     return true;
                 }
             }
 
-            return false;
+            return $hasCallable && self::matchBuiltinType('callable', $var, $strict);
         }
 
         if ($type instanceof ReflectionIntersectionType) {
