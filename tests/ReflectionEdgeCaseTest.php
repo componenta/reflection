@@ -125,6 +125,23 @@ final class EdgeCallableChild extends EdgeCallableAncestor
     }
 }
 
+class QualifiedMagicAncestor
+{
+    /** @param array<array-key, mixed> $arguments */
+    public static function __callStatic(string $method, array $arguments): string
+    {
+        return 'magic:' . $method;
+    }
+}
+
+final class QualifiedMagicChild extends QualifiedMagicAncestor
+{
+    public static function selected(string $value = 'declared'): string
+    {
+        return $value;
+    }
+}
+
 test('a string callable with a separator inside its class alias reflects the concrete method', function (): void {
     $alias = EdgeCallableAncestor::class . '::Alias';
     class_alias(EdgeCallableAncestor::class, $alias);
@@ -330,4 +347,30 @@ test('captured magic dispatch has no concrete signature', function (): void {
     expect(Reflection::callable($object->privateClosure())->getParameters()[0]->getDefaultValue())->toBe('declared')
         ->and(Reflection::callable(strlen(...))->getNumberOfParameters())->toBe(1)
         ->and(Reflection::callable((new \ArrayObject())->count(...))->getNumberOfParameters())->toBe(0);
+});
+
+test('qualified captures use the selected declaration when detecting magic dispatch', function (): void {
+    $child = new QualifiedMagicChild();
+    $qualified = [$child, QualifiedMagicAncestor::class . '::selected'];
+    $native = new ReflectionClass(QualifiedMagicChild::class);
+    $nativeQualified = [$native, ReflectionClass::class . '::__toString'];
+    set_error_handler(static function (int $level, string $message, string $file, int $line): bool {
+        if ($level === E_DEPRECATED && str_starts_with($message, 'Callables of the form ')) {
+            return true;
+        }
+        throw new ErrorException($message, 0, $level, $file, $line);
+    });
+
+    try {
+        $magic = Closure::fromCallable($qualified);
+        $nativeCapture = Closure::fromCallable($nativeQualified);
+
+        expect($magic())->toBe('magic:selected')
+            ->and(Reflection::reflect($magic))->toBeNull()
+            ->and(fn () => Reflection::callable($magic))->toThrow(InvalidArgumentException::class, 'magic dispatch')
+            ->and(Reflection::callable(QualifiedMagicChild::selected(...))->invoke())->toBe('declared')
+            ->and(Reflection::callable($nativeCapture)->invoke())->toBe((string) $native);
+    } finally {
+        restore_error_handler();
+    }
 });

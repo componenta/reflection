@@ -498,23 +498,13 @@ final class Reflection
         }
 
         $name = $reflection->getName();
-        if ($scope->hasMethod($name)) {
-            $method = $scope->getMethod($name);
-            if ($method->isInternal() && $method->getDeclaringClass()->getName() === $scope->getName()) {
-                return false;
-            }
-        }
-
-        $receiver = $reflection->getClosureThis();
-        $class = $receiver === null
-            ? ($reflection->getClosureCalledClass() ?? $scope)->getName()
-            : $receiver::class;
-        try {
-            self::concreteMethod($class, $name, $receiver === null);
-            return false;
-        } catch (\InvalidArgumentException) {
+        if (!$scope->hasMethod($name)) {
             return true;
         }
+
+        // The called class may declare a different method with the trampoline's name.
+        $method = $scope->getMethod($name);
+        return !$method->isInternal() || $method->getDeclaringClass()->getName() !== $scope->getName();
     }
 
     private static function method(string $class, string $method): ReflectionMethod
