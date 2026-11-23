@@ -53,19 +53,9 @@ final class Reflection
         ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector,
         ?string $name = null,
     ): ?array {
+        /** @var list<ReflectionAttribute<T>>|null $definitions */
         $definitions = self::metadataDefinitions($reflector, $name);
-        if ($definitions === null) {
-            return null;
-        }
-
-        $instances = [];
-        foreach ($definitions as $definition) {
-            /** @var T $instance */
-            $instance = $definition->newInstance();
-            $instances[] = $instance;
-        }
-
-        return $instances;
+        return $definitions === null ? null : self::instantiateMetadata($definitions);
     }
 
     /**
@@ -121,13 +111,7 @@ final class Reflection
     public static function callable(callable $callable): ReflectionFunctionAbstract
     {
         if ($callable instanceof Closure) {
-            $cache = self::$closures ??= new WeakMap();
-            $reflection = ($cache[$callable] ?? null)?->get();
-            if ($reflection === null) {
-                $reflection = new CachedFunctionReflection($callable);
-                $cache[$callable] = WeakReference::create($reflection);
-            }
-            return $reflection;
+            return self::closure($callable);
         }
 
         if (is_string($callable)) {
@@ -211,24 +195,31 @@ final class Reflection
      */
     public static function getDeepMetadata(ReflectionClass $reflector, ?string $name = null): array
     {
-        $result = [];
+        // Attribute constructors can change a caller-owned reflector.
+        /** @var list<array{string, list<ReflectionAttribute<T>>}> $definitions */
+        $definitions = [];
         $className = $reflector->getName();
-        self::appendMetadata($result, $className, $reflector, $name);
+        self::appendMetadataDefinitions($definitions, $className, $reflector, $name);
 
         foreach ($reflector->getMethods() as $method) {
-            self::appendMetadata($result, $className . '::' . $method->getName() . '()', $method, $name);
+            self::appendMetadataDefinitions($definitions, $className . '::' . $method->getName() . '()', $method, $name);
         }
 
         foreach ($reflector->getProperties() as $property) {
-            self::appendMetadata($result, $className . '::$' . $property->getName(), $property, $name);
+            self::appendMetadataDefinitions($definitions, $className . '::$' . $property->getName(), $property, $name);
 
             foreach ($property->getHooks() as $hook) {
-                self::appendMetadata($result, $className . '::' . $hook->getName() . '()', $hook, $name);
+                self::appendMetadataDefinitions($definitions, $className . '::' . $hook->getName() . '()', $hook, $name);
             }
         }
 
         foreach ($reflector->getReflectionConstants() as $constant) {
-            self::appendMetadata($result, $className . '::' . $constant->getName(), $constant, $name);
+            self::appendMetadataDefinitions($definitions, $className . '::' . $constant->getName(), $constant, $name);
+        }
+
+        $result = [];
+        foreach ($definitions as [$path, $attributes]) {
+            $result[$path] = self::instantiateMetadata($attributes);
         }
 
         return $result;
@@ -383,21 +374,37 @@ final class Reflection
 
     /**
      * @template T of object
-     * @param array<string, list<T>> $result
-     * @param-out array<string, list<T>> $result
+     * @param list<array{string, list<ReflectionAttribute<T>>}> $result
+     * @param-out list<array{string, list<ReflectionAttribute<T>>}> $result
      * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
      * @param class-string<T>|null $name
      */
-    private static function appendMetadata(
+    private static function appendMetadataDefinitions(
         array &$result,
         string $path,
         ReflectionFunctionAbstract|ReflectionClass|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector,
         ?string $name,
     ): void {
-        $metadata = self::getMetadata($reflector, $name);
-        if ($metadata !== null) {
-            $result[$path] = $metadata;
+        /** @var list<ReflectionAttribute<T>>|null $definitions */
+        $definitions = self::metadataDefinitions($reflector, $name);
+        if ($definitions !== null) {
+            $result[] = [$path, $definitions];
         }
+    }
+
+    /**
+     * @template T of object
+     * @param list<ReflectionAttribute<T>> $definitions
+     * @return list<T>
+     */
+    private static function instantiateMetadata(array $definitions): array
+    {
+        $instances = [];
+        foreach ($definitions as $definition) {
+            $instances[] = $definition->newInstance();
+        }
+
+        return $instances;
     }
 
     private static function constantAttributeMethod(): string
@@ -430,13 +437,61 @@ final class Reflection
     private static function qualifiedMethod(callable $callable, bool $staticOwner): ReflectionFunction
     {
         // Native capture preserves which ancestor and called scope PHP selected.
-        $reflection = new CachedFunctionReflection(Closure::fromCallable($callable));
+        $closure = Closure::fromCallable($callable);
+        if (is_array($callable) && $closure === $callable[0]) {
+            return self::closure($closure);
+        }
+
+        $reflection = new CachedFunctionReflection($closure);
         $scope = $reflection->getClosureScopeClass();
         if ($scope === null) {
             throw new \InvalidArgumentException('Qualified callable has no concrete method to reflect.');
         }
         self::concreteMethod($scope->getName(), $reflection->getName(), $staticOwner);
         return $reflection;
+    }
+
+    private static function closure(Closure $closure): ReflectionFunction
+    {
+        $cache = self::$closures ??= new WeakMap();
+        $reflection = ($cache[$closure] ?? null)?->get();
+        if ($reflection === null) {
+            $reflection = new CachedFunctionReflection($closure);
+            if (self::isMagicCapture($reflection)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Callable %s() is resolved through magic dispatch and has no concrete method to reflect.',
+                    $reflection->getName(),
+                ));
+            }
+            $cache[$closure] = WeakReference::create($reflection);
+        }
+        return $reflection;
+    }
+
+    private static function isMagicCapture(ReflectionFunction $reflection): bool
+    {
+        if (!$reflection->isInternal() || ($scope = $reflection->getClosureScopeClass()) === null) {
+            return false;
+        }
+
+        $name = $reflection->getName();
+        if ($scope->hasMethod($name)) {
+            $method = $scope->getMethod($name);
+            if ($method->isInternal() && $method->getDeclaringClass()->getName() === $scope->getName()) {
+                return false;
+            }
+        }
+
+        $receiver = $reflection->getClosureThis();
+        $class = $receiver === null
+            ? ($reflection->getClosureCalledClass() ?? $scope)->getName()
+            : $receiver::class;
+        try {
+            self::concreteMethod($class, $name, $receiver === null);
+            return false;
+        } catch (\InvalidArgumentException) {
+            return true;
+        }
     }
 
     private static function method(string $class, string $method): ReflectionMethod

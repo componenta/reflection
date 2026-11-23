@@ -18,12 +18,49 @@ final class EdgeAttribute {}
 #[EdgeAttribute]
 final class EdgeAnnotatedClass {}
 
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+final class RetargetingMetadata
+{
+    /** @var ReflectionClass<object>|null */
+    public static ?ReflectionClass $reflector = null;
+
+    public function __construct(public string $value, bool $retarget = false)
+    {
+        if ($retarget) {
+            self::$reflector?->__construct(RetargetedDeclaration::class);
+        }
+    }
+}
+
+#[RetargetingMetadata('original class', retarget: true)]
+final class OriginalDeclaration
+{
+    #[RetargetingMetadata('original method')]
+    public function original(): void {}
+}
+
+final class RetargetedDeclaration
+{
+    #[RetargetingMetadata('replacement method')]
+    public function replacement(): void {}
+}
+
 interface EdgeInterface {}
 trait EdgeTrait {}
 enum EdgeEnum { case Value; }
 
 final class EdgeMagicCallable
 {
+    public function privateClosure(): Closure
+    {
+        return $this->hidden(...);
+    }
+
+    private function hidden(string $value = 'declared'): string
+    {
+        return $value;
+    }
+
     public function __call(string $name, array $arguments): mixed
     {
         return null;
@@ -81,6 +118,8 @@ test('qualified callables reflect the declaration selected by PHP', function ():
     $ancestor = [$target, EdgeCallableAncestor::class . '::select'];
     $static = [EdgeCallableChild::class, EdgeCallableAncestor::class . '::selectStatic'];
     $magic = [$target, EdgeCallableAncestor::class . '::missing'];
+    $closure = static fn (string $value = 'closure'): string => $value;
+    $qualifiedClosure = [$closure, Closure::class . '::__invoke'];
     set_error_handler(static function (int $level, string $message, string $file, int $line): bool {
         if ($level === E_DEPRECATED && str_starts_with($message, 'Callables of the form ')) {
             return true;
@@ -89,7 +128,7 @@ test('qualified callables reflect the declaration selected by PHP', function ():
     });
 
     try {
-        foreach ([[$ancestor, 'ancestor'], [$static, 'ancestor static']] as [$input, $default]) {
+        foreach ([[$ancestor, 'ancestor'], [$static, 'ancestor static'], [$qualifiedClosure, 'closure']] as [$input, $default]) {
             if (!is_callable($input)) {
                 throw new \LogicException('Expected a native qualified callable.');
             }
@@ -97,7 +136,8 @@ test('qualified callables reflect the declaration selected by PHP', function ():
                 ->and(Reflection::callable($input)->getParameters()[0]->getDefaultValue())->toBe($default);
         }
         expect(Reflection::callable([$target, 'select'])->getParameters()[0]->getDefaultValue())->toBe('child')
-            ->and(Reflection::reflect($magic))->toBeNull();
+            ->and(Reflection::reflect($magic))->toBeNull()
+            ->and(Reflection::reflect($qualifiedClosure))->toBe(Reflection::callable($closure));
     } finally {
         restore_error_handler();
     }
@@ -135,6 +175,25 @@ test('metadata cache separates unfiltered and empty-name lookups', function (): 
 
     expect(Reflection::getMetadata($reflector, ''))->toBeNull()
         ->and(Reflection::getMetadata($reflector))->toHaveCount(1);
+});
+
+test('deep metadata uses one declaration if an attribute retargets the reflector', function (): void {
+    $reflector = new ReflectionClass(OriginalDeclaration::class);
+    RetargetingMetadata::$reflector = $reflector;
+
+    try {
+        $metadata = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+    } finally {
+        RetargetingMetadata::$reflector = null;
+    }
+    $next = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+
+    expect(array_map(static fn (array $attributes): string => $attributes[0]->value, $metadata))->toBe([
+        OriginalDeclaration::class => 'original class',
+        OriginalDeclaration::class . '::original()' => 'original method',
+    ])->and(array_map(static fn (array $attributes): string => $attributes[0]->value, $next))->toBe([
+        RetargetedDeclaration::class . '::replacement()' => 'replacement method',
+    ]);
 });
 
 test('ReflectionConstant metadata is safe across supported PHP versions', function (): void {
@@ -186,4 +245,22 @@ test('magic-dispatch callables have no concrete method reflection', function ():
 
     expect(Reflection::reflect($instanceCallable))->toBeNull()
         ->and(Reflection::reflect($staticCallable))->toBeNull();
+});
+
+test('captured magic dispatch has no concrete signature', function (): void {
+    $object = new EdgeMagicCallable();
+    $calls = [
+        Closure::fromCallable([$object, 'missing']),
+        Closure::fromCallable([EdgeMagicCallable::class, 'missing']),
+        Closure::fromCallable([$object, 'hidden']),
+    ];
+    foreach ($calls as $callable) {
+        expect(fn () => Reflection::callable($callable))
+            ->toThrow(InvalidArgumentException::class, 'magic dispatch')
+            ->and(Reflection::reflect($callable))->toBeNull();
+    }
+
+    expect(Reflection::callable($object->privateClosure())->getParameters()[0]->getDefaultValue())->toBe('declared')
+        ->and(Reflection::callable(strlen(...))->getNumberOfParameters())->toBe(1)
+        ->and(Reflection::callable((new \ArrayObject())->count(...))->getNumberOfParameters())->toBe(0);
 });

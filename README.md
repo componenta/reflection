@@ -21,7 +21,7 @@ $method = Reflection::callable([App\Service\UserService::class, 'handle']);
 
 `Reflection::class()` supports classes, interfaces, traits and enums and returns `null` when the symbol does not exist.
 
-`Reflection::callable()` supports functions, closures, concrete methods and invokable objects. Callables resolved only through `__call()` or `__callStatic()` are rejected because they have no concrete method signature to reflect.
+`Reflection::callable()` supports functions, closures, concrete methods and invokable objects. It rejects callables resolved only through `__call()` or `__callStatic()` when PHP exposes no concrete signature, including the internal closures returned by `Closure::fromCallable()` for such methods.
 
 Qualified ancestor callables return a `ReflectionFunction` for the native capture, retaining PHP's selected declaration and called class.
 
@@ -59,6 +59,8 @@ App\Command\CreatePostCommand::STATUS
 
 Use `getFirstDeepMetadata()` for the first matching attribute and `hasDeepMetadata()` for an existence check without instantiating attributes.
 
+`getDeepMetadata()` collects the matching declarations before running attribute constructors.
+
 ## Reflection types
 
 ```php
@@ -95,6 +97,8 @@ if (ReflectionType::canCoerce($type, $value)) {
 ```
 
 Coercion is limited to reflected PHP types. Union coercion succeeds only when the value already matches a branch or exactly one branch is coercible; ambiguous conversions are rejected.
+
+Integer coercion truncates finite values toward zero after checking the platform integer range. Decimal and scientific strings are checked and converted without rounding through a float.
 
 Arrays can be produced from arrays, iterables and `Componenta\Arrayable\Arrayable` values. Scalars are not wrapped into one-element arrays.
 

@@ -175,7 +175,7 @@ final class ReflectionType
             'object' => is_object($var),
             'array' => is_array($var),
             'bool' => is_bool($var),
-            'int' => $strict ? is_int($var) : self::matchesIntLoosely($var),
+            'int' => $strict ? is_int($var) : self::integerValue($var) !== null,
             'float' => $strict ? is_float($var) : is_numeric($var),
             'string' => $strict ? is_string($var) : is_string($var) || $var instanceof Stringable,
             'false' => $var === false,
@@ -241,7 +241,7 @@ final class ReflectionType
 
         return match ($type->getName()) {
             'mixed' => true,
-            'int' => self::canCoerceToInt($value),
+            'int' => is_bool($value) || self::integerValue($value) !== null,
             'float' => is_int($value)
                 || is_float($value)
                 || is_bool($value)
@@ -326,12 +326,17 @@ final class ReflectionType
             throw self::coercionException($type, $value);
         }
 
+        $name = $type->getName();
+        if ($name === 'int') {
+            return (is_bool($value) ? (int) $value : self::integerValue($value))
+                ?? throw self::coercionException($type, $value);
+        }
+
         if (!self::canCoerceNamedType($type, $value, $scope)) {
             throw self::coercionException($type, $value);
         }
 
-        return match ($type->getName()) {
-            'int' => self::coerceToInt($value),
+        return match ($name) {
             'float' => self::coerceToFloat($value),
             'string' => self::coerceToString($value),
             'bool' => (bool) $value,
@@ -341,96 +346,70 @@ final class ReflectionType
         };
     }
 
-    private static function coerceToInt(mixed $value): int
+    private static function integerValue(mixed $value): ?int
     {
-        if (!self::canCoerceToInt($value)) {
-            throw new InvalidArgumentException(sprintf(
-                'Value of type %s cannot be coerced to int.',
-                get_debug_type($value),
-            ));
-        }
-
-        if (is_int($value)) {
-            return $value;
-        }
-
-        if (is_float($value)) {
-            return (int) $value;
-        }
-
-        if (is_bool($value)) {
-            return (int) $value;
-        }
-
-        if (is_string($value)) {
-            return (int) $value;
-        }
-
-        throw new \LogicException('Integer coercion invariant was violated.');
-    }
-
-    private static function canCoerceToInt(mixed $value): bool
-    {
-        return is_bool($value) || self::matchesIntLoosely($value);
-    }
-
-    private static function matchesIntLoosely(mixed $value): bool
-    {
-        if (is_int($value)) {
-            return true;
-        }
-
-        if (is_float($value)) {
-            return self::floatFitsInt($value);
-        }
-
-        if (!is_string($value) || !is_numeric($value)) {
-            return false;
-        }
-
-        $integerString = self::integerStringFitsInt($value);
-        if ($integerString !== null) {
-            return $integerString;
-        }
-
-        return self::floatFitsInt((float) $value);
+        return match (true) {
+            is_int($value) => $value,
+            is_float($value) && self::floatFitsInt($value) => (int) $value,
+            is_string($value) => self::integerFromString($value),
+            default => null,
+        };
     }
 
     private static function floatFitsInt(float $value): bool
     {
-        if (!is_finite($value) || $value < PHP_INT_MIN || $value > PHP_INT_MAX) {
-            return false;
-        }
-
-        $converted = (int) $value;
-
-        return !($value > 0 && $converted < 0)
-            && !($value < 0 && $converted > 0);
+        // On 64-bit PHP the floating-point comparison rounds PHP_INT_MAX up.
+        return is_finite($value) && $value >= PHP_INT_MIN && $value <= PHP_INT_MAX
+            && $value < -(float) PHP_INT_MIN;
     }
 
-    private static function integerStringFitsInt(string $value): ?bool
+    private static function integerFromString(string $value): ?int
     {
-        $value = trim($value);
-        if (preg_match('/^[+-]?\d+$/D', $value) !== 1) {
+        if (!is_numeric($value)) {
             return null;
         }
 
-        $negative = str_starts_with($value, '-');
-        $digits = ltrim($value, '+-');
-        $digits = ltrim($digits, '0');
-        if ($digits === '') {
-            return true;
+        $number = +$value;
+        if (is_int($number)) {
+            return $number;
         }
 
+        // Decimal and scientific notation need exact digit arithmetic near the platform limits.
+        $value = trim($value, " \t\n\r\v\f");
+        if (preg_match('/\A([+-]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]+))?\z/', $value, $parts) !== 1) {
+            return null;
+        }
+        $fraction = $parts[3] ?? '';
+        $digits = ltrim($parts[2] . $fraction, '0');
+        if ($digits === '') {
+            return 0;
+        }
+
+        $negative = $parts[1] === '-';
         $limit = $negative
             ? substr((string) PHP_INT_MIN, 1)
             : (string) PHP_INT_MAX;
-
-        $length = strlen($digits);
         $limitLength = strlen($limit);
+        $exponent = (int) ($parts[4] ?? '0');
+        $wholeLength = strlen($digits) - strlen($fraction);
 
-        return $length < $limitLength
-            || ($length === $limitLength && strcmp($digits, $limit) <= 0);
+        // Check the exponent before adding it or allocating any zero padding.
+        if ($exponent <= -$wholeLength) {
+            return 0;
+        }
+        if ($exponent > $limitLength - $wholeLength) {
+            return null;
+        }
+        $wholeLength += $exponent;
+        $whole = str_pad(substr($digits, 0, $wholeLength), $wholeLength, '0');
+        if ($wholeLength === $limitLength) {
+            $comparison = strcmp($whole, $limit);
+            if ($comparison > 0 || ($comparison === 0 && trim(substr($digits, $wholeLength), '0') !== '')) {
+                return null;
+            }
+        }
+
+        return (int) ($negative ? '-' . $whole : $whole);
     }
 
     private static function coerceToFloat(mixed $value): float
