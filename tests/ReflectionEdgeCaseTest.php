@@ -11,6 +11,8 @@ use ErrorException;
 use InvalidArgumentException;
 use ReflectionClass;
 use ReflectionConstant;
+use ReflectionMethod;
+use ReflectionObject;
 
 #[Attribute]
 final class EdgeAttribute {}
@@ -18,7 +20,7 @@ final class EdgeAttribute {}
 #[EdgeAttribute]
 final class EdgeAnnotatedClass {}
 
-#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD | Attribute::TARGET_PROPERTY)]
 final class RetargetingMetadata
 {
     /** @var ReflectionClass<object>|null */
@@ -69,6 +71,45 @@ final class AttributeReadRetargetingClass extends ReflectionClass
         $definitions = $this->beforeRead ? [] : parent::getAttributes($name, $flags);
         parent::__construct($this->replacement);
         return $this->beforeRead ? parent::getAttributes($name, $flags) : $definitions;
+    }
+}
+
+final class MemberMetadataSource
+{
+    #[RetargetingMetadata('original property')]
+    public string $original;
+}
+
+final class MemberMetadataReplacement
+{
+    #[RetargetingMetadata('replacement property')]
+    public string $replacement;
+
+    #[RetargetingMetadata('replacement method')]
+    public function replace(): void {}
+}
+
+/** @extends ReflectionClass<object> */
+final class MemberReadRetargetingClass extends ReflectionClass
+{
+    private bool $firstRead = true;
+
+    /** @param class-string $class */
+    public function __construct(string $class, private readonly bool $beforeRead)
+    {
+        parent::__construct($class);
+    }
+
+    /** @return list<ReflectionMethod> */
+    public function getMethods(?int $filter = null): array
+    {
+        if (!$this->firstRead) {
+            return parent::getMethods($filter);
+        }
+        $this->firstRead = false;
+        $methods = $this->beforeRead ? [] : parent::getMethods($filter);
+        parent::__construct(MemberMetadataReplacement::class);
+        return $this->beforeRead ? parent::getMethods($filter) : $methods;
     }
 }
 
@@ -278,6 +319,116 @@ test('short deep metadata queries keep custom class metadata and skip member loo
 
     expect(Reflection::getFirstDeepMetadata($reflector, RetargetingMetadata::class)?->value)->toBe('original class')
         ->and(Reflection::hasDeepMetadata($reflector, RetargetingMetadata::class))->toBeTrue();
+});
+
+test('deep metadata keeps the selected class when a member query retargets its reflector', function (bool $beforeRead): void {
+    $reflector = new MemberReadRetargetingClass(MemberMetadataSource::class, $beforeRead);
+    $metadata = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+    $next = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+
+    expect(array_map(static fn (array $attributes): string => $attributes[0]->value, $metadata))->toBe([
+        MemberMetadataSource::class . '::$original' => 'original property',
+    ])->and(array_map(static fn (array $attributes): string => $attributes[0]->value, $next))->toBe([
+        MemberMetadataReplacement::class . '::replace()' => 'replacement method',
+        MemberMetadataReplacement::class . '::$replacement' => 'replacement property',
+    ]);
+})->with(['before reading methods' => true, 'after reading methods' => false]);
+
+test('short deep queries do not inspect replacement members during the current lookup', function (bool $beforeRead): void {
+    $first = new MemberReadRetargetingClass(MemberMetadataSource::class, $beforeRead);
+    $has = new MemberReadRetargetingClass(EdgeAnnotatedClass::class, $beforeRead);
+
+    expect(Reflection::getFirstDeepMetadata($first, RetargetingMetadata::class)?->value)->toBe('original property')
+        ->and(Reflection::hasDeepMetadata($has, RetargetingMetadata::class))->toBeFalse()
+        ->and(Reflection::getFirstDeepMetadata($first, RetargetingMetadata::class)?->value)->toBe('replacement method')
+        ->and(Reflection::hasDeepMetadata($has, RetargetingMetadata::class))->toBeTrue();
+})->with(['before reading methods' => true, 'after reading methods' => false]);
+
+test('deep queries preserve custom member filters and stop on a matching method', function (): void {
+    $filtered = new class (MemberMetadataReplacement::class) extends ReflectionClass {
+        public function getMethods(?int $filter = null): array
+        {
+            return [];
+        }
+    };
+    $methodOnly = new class (MemberMetadataReplacement::class) extends ReflectionClass {
+        public function getProperties(?int $filter = null): array
+        {
+            throw new \LogicException('The matching method completes the lookup.');
+        }
+    };
+
+    expect(array_keys(Reflection::getDeepMetadata($filtered, RetargetingMetadata::class)))
+        ->toBe([MemberMetadataReplacement::class . '::$replacement'])
+        ->and(Reflection::getFirstDeepMetadata($methodOnly, RetargetingMetadata::class)?->value)->toBe('replacement method')
+        ->and(Reflection::hasDeepMetadata($methodOnly, RetargetingMetadata::class))->toBeTrue();
+});
+
+test('deep lookup uses the initial custom path and native declaration identity', function (): void {
+    /** @var class-string $alias */
+    $alias = __NAMESPACE__ . '\\MemberMetadataAlias';
+    class_alias(MemberMetadataSource::class, $alias);
+    $reflector = new class ($alias) extends ReflectionClass {
+        public int $nameReads = 0;
+
+        public string $name {
+            get => throw new \LogicException('Native identity must bypass the property hook for ' . $this->name . '.');
+        }
+
+        /** @param class-string $alias */
+        public function __construct(private readonly string $alias)
+        {
+            parent::__construct(MemberMetadataSource::class);
+        }
+
+        public function getName(): string
+        {
+            ++$this->nameReads;
+            return $this->alias;
+        }
+
+        public function getMethods(?int $filter = null): array
+        {
+            parent::__construct(MemberMetadataReplacement::class);
+            return parent::getMethods($filter);
+        }
+    };
+
+    $metadata = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+
+    expect(array_keys($metadata))->toBe([$alias . '::$original'])
+        ->and($reflector->nameReads)->toBe(1);
+});
+
+test('deep lookup keeps the native owner when the initial name reader retargets the reflector', function (): void {
+    $reflector = new class (MemberMetadataSource::class) extends ReflectionClass {
+        public function getName(): string
+        {
+            $name = parent::getName();
+            parent::__construct(MemberMetadataReplacement::class);
+            return $name;
+        }
+    };
+
+    $metadata = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+
+    expect(array_keys($metadata))->toBe([MemberMetadataSource::class . '::$original']);
+});
+
+test('deep lookup holds its declaration through native lazy property reflection', function (): void {
+    $class = new ReflectionClass(MemberMetadataSource::class);
+    $reflector = new ReflectionObject(new MemberMetadataSource());
+    $lazy = $class->newLazyGhost(static function (MemberMetadataSource $object) use ($reflector): void {
+        $reflector->__construct(new MemberMetadataReplacement());
+        $object->original = 'initialized';
+    });
+    $reflector->__construct($lazy);
+
+    $metadata = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+
+    expect(array_keys($metadata))->toBe([MemberMetadataSource::class . '::$original'])
+        ->and($class->isUninitializedLazyObject($lazy))->toBeFalse()
+        ->and($reflector->getName())->toBe(MemberMetadataReplacement::class);
 });
 
 test('ReflectionConstant metadata is safe across supported PHP versions', function (): void {

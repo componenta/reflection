@@ -43,9 +43,11 @@ final class Reflection
     /** @var WeakMap<Reflector, array<string, list<ReflectionAttribute<object>>|null>>|null */
     private static ?WeakMap $metadata = null;
 
+    private static ?ReflectionMethod $classNameReader = null;
+
     /**
      * @template T of object
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<covariant object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @param class-string<T>|null $name
      * @return list<T>|null
      */
@@ -60,7 +62,7 @@ final class Reflection
 
     /**
      * @template T of object
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<covariant object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @param class-string<T> $name
      * @return T|null
      */
@@ -80,7 +82,7 @@ final class Reflection
     }
 
     /**
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<covariant object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @param class-string $name
      */
     public static function hasMetadata(
@@ -189,7 +191,7 @@ final class Reflection
 
     /**
      * @template T of object
-     * @param ReflectionClass<object> $reflector
+     * @param ReflectionClass<covariant object> $reflector
      * @param class-string<T>|null $name
      * @return array<string, list<T>>
      */
@@ -198,16 +200,16 @@ final class Reflection
         // Attribute constructors can change a caller-owned reflector.
         /** @var list<array{string, list<ReflectionAttribute<T>>}> $definitions */
         $definitions = [];
-        [$className, $reflector, $classDefinitions] = self::deepClassDefinitions($reflector, $name);
+        [$className, $reflector, $classDefinitions, $ownerName] = self::deepClassDefinitions($reflector, $name);
         if ($classDefinitions !== null) {
             $definitions[] = [$className, $classDefinitions];
         }
 
-        foreach ($reflector->getMethods() as $method) {
+        foreach ($ownerName === null ? $reflector->getMethods() : self::readDeepMembers($reflector, $ownerName, 'getMethods') as $method) {
             self::appendMetadataDefinitions($definitions, $className . '::' . $method->getName() . '()', $method, $name);
         }
 
-        foreach ($reflector->getProperties() as $property) {
+        foreach ($ownerName === null ? $reflector->getProperties() : self::readDeepMembers($reflector, $ownerName, 'getProperties') as $property) {
             self::appendMetadataDefinitions($definitions, $className . '::$' . $property->getName(), $property, $name);
 
             foreach ($property->getHooks() as $hook) {
@@ -215,7 +217,7 @@ final class Reflection
             }
         }
 
-        foreach ($reflector->getReflectionConstants() as $constant) {
+        foreach ($ownerName === null ? $reflector->getReflectionConstants() : self::readDeepMembers($reflector, $ownerName, 'getReflectionConstants') as $constant) {
             self::appendMetadataDefinitions($definitions, $className . '::' . $constant->getName(), $constant, $name);
         }
 
@@ -229,25 +231,25 @@ final class Reflection
 
     /**
      * @template T of object
-     * @param ReflectionClass<object> $reflector
+     * @param ReflectionClass<covariant object> $reflector
      * @param class-string<T> $name
      * @return T|null
      */
     public static function getFirstDeepMetadata(ReflectionClass $reflector, string $name): ?object
     {
-        [, $reflector, $classDefinitions] = self::deepClassDefinitions($reflector, $name);
+        [, $reflector, $classDefinitions, $ownerName] = self::deepClassDefinitions($reflector, $name);
         if ($classDefinitions !== null) {
             return $classDefinitions[0]->newInstance();
         }
 
-        foreach ($reflector->getMethods() as $method) {
+        foreach ($ownerName === null ? $reflector->getMethods() : self::readDeepMembers($reflector, $ownerName, 'getMethods') as $method) {
             $attribute = self::getFirstMetadata($method, $name);
             if ($attribute !== null) {
                 return $attribute;
             }
         }
 
-        foreach ($reflector->getProperties() as $property) {
+        foreach ($ownerName === null ? $reflector->getProperties() : self::readDeepMembers($reflector, $ownerName, 'getProperties') as $property) {
             $attribute = self::getFirstMetadata($property, $name);
             if ($attribute !== null) {
                 return $attribute;
@@ -261,7 +263,7 @@ final class Reflection
             }
         }
 
-        foreach ($reflector->getReflectionConstants() as $constant) {
+        foreach ($ownerName === null ? $reflector->getReflectionConstants() : self::readDeepMembers($reflector, $ownerName, 'getReflectionConstants') as $constant) {
             $attribute = self::getFirstMetadata($constant, $name);
             if ($attribute !== null) {
                 return $attribute;
@@ -272,23 +274,23 @@ final class Reflection
     }
 
     /**
-     * @param ReflectionClass<object> $reflector
+     * @param ReflectionClass<covariant object> $reflector
      * @param class-string $name
      */
     public static function hasDeepMetadata(ReflectionClass $reflector, string $name): bool
     {
-        [, $reflector, $classDefinitions] = self::deepClassDefinitions($reflector, $name);
+        [, $reflector, $classDefinitions, $ownerName] = self::deepClassDefinitions($reflector, $name);
         if ($classDefinitions !== null) {
             return true;
         }
 
-        foreach ($reflector->getMethods() as $method) {
+        foreach ($ownerName === null ? $reflector->getMethods() : self::readDeepMembers($reflector, $ownerName, 'getMethods') as $method) {
             if (self::hasMetadata($method, $name)) {
                 return true;
             }
         }
 
-        foreach ($reflector->getProperties() as $property) {
+        foreach ($ownerName === null ? $reflector->getProperties() : self::readDeepMembers($reflector, $ownerName, 'getProperties') as $property) {
             if (self::hasMetadata($property, $name)) {
                 return true;
             }
@@ -300,7 +302,7 @@ final class Reflection
             }
         }
 
-        foreach ($reflector->getReflectionConstants() as $constant) {
+        foreach ($ownerName === null ? $reflector->getReflectionConstants() : self::readDeepMembers($reflector, $ownerName, 'getReflectionConstants') as $constant) {
             if (self::hasMetadata($constant, $name)) {
                 return true;
             }
@@ -317,30 +319,76 @@ final class Reflection
         self::$closures = null;
         self::$objects = null;
         self::$metadata = null;
+        self::$classNameReader = null;
     }
 
     /**
      * @template T of object
-     * @param ReflectionClass<object> $reflector
+     * @param ReflectionClass<covariant object> $reflector
      * @param class-string<T>|null $name
-     * @return array{class-string, ReflectionClass<object>, list<ReflectionAttribute<T>>|null}
+     * @return array{class-string, ReflectionClass<covariant object>, list<ReflectionAttribute<T>>|null, class-string|null}
      */
     private static function deepClassDefinitions(ReflectionClass $reflector, ?string $name): array
     {
+        $ownerName = match ($reflector::class) {
+            ReflectionClass::class, ReflectionObject::class, CachedClassReflection::class, CachedObjectReflection::class => null,
+            default => self::nativeClassName($reflector),
+        };
         $className = $reflector->getName();
+        // Read the path offered by the caller and keep the native declaration selected at entry.
+        if ($ownerName !== null && self::nativeClassName($reflector) !== $ownerName) {
+            $reflector = new ReflectionClass($ownerName);
+            $ownerName = null;
+        }
+
         $definitions = self::metadataDefinitions($reflector, $name);
         // Custom attribute readers may retarget the borrowed reflector during a read.
-        if ($reflector->getName() !== $className) {
-            $reflector = new ReflectionClass($className);
+        if ($ownerName !== null && self::nativeClassName($reflector) !== $ownerName) {
+            $reflector = new ReflectionClass($ownerName);
+            $ownerName = null;
             $definitions = self::metadataDefinitions($reflector, $name);
+        }
+        if ($reflector::class === ReflectionObject::class) {
+            // Reading properties can initialize the reflected object.
+            $ownerName = $className;
         }
 
         /** @var list<ReflectionAttribute<T>>|null $definitions */
-        return [$className, $reflector, $definitions];
+        return [$className, $reflector, $definitions, $ownerName];
     }
 
     /**
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
+     * @param ReflectionClass<covariant object> $reflector
+     * @return class-string
+     */
+    private static function nativeClassName(ReflectionClass $reflector): string
+    {
+        $getName = self::$classNameReader ??= new ReflectionMethod(ReflectionClass::class, 'getName');
+
+        /** @var class-string */
+        return $getName->invoke($reflector);
+    }
+
+    /**
+     * @param ReflectionClass<covariant object> $reflector
+     * @param class-string $ownerName
+     * @param 'getMethods'|'getProperties'|'getReflectionConstants' $query
+     * @return ($query is 'getMethods' ? list<ReflectionMethod> : ($query is 'getProperties' ? list<ReflectionProperty> : list<ReflectionClassConstant>))
+     */
+    private static function readDeepMembers(ReflectionClass $reflector, string $ownerName, string $query): array
+    {
+        if (self::nativeClassName($reflector) === $ownerName) {
+            $members = $reflector->$query();
+            if (self::nativeClassName($reflector) === $ownerName) {
+                return $members;
+            }
+        }
+
+        return new ReflectionClass($ownerName)->$query();
+    }
+
+    /**
+     * @param ReflectionFunctionAbstract|ReflectionClass<covariant object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @return list<ReflectionAttribute<object>>|null
      */
     private static function metadataDefinitions(
@@ -372,7 +420,7 @@ final class Reflection
     }
 
     /**
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<covariant object>|ReflectionParameter|ReflectionClassConstant|ReflectionConstant|ReflectionProperty $reflector
      * @return list<ReflectionAttribute<object>>
      */
     private static function attributeDefinitions(
@@ -399,7 +447,7 @@ final class Reflection
      * @template T of object
      * @param list<array{string, list<ReflectionAttribute<T>>}> $result
      * @param-out list<array{string, list<ReflectionAttribute<T>>}> $result
-     * @param ReflectionFunctionAbstract|ReflectionClass<object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
+     * @param ReflectionFunctionAbstract|ReflectionClass<covariant object>|ReflectionParameter|ReflectionClassConstant|ReflectionProperty $reflector
      * @param class-string<T>|null $name
      */
     private static function appendMetadataDefinitions(
