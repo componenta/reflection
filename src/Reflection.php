@@ -198,8 +198,10 @@ final class Reflection
         // Attribute constructors can change a caller-owned reflector.
         /** @var list<array{string, list<ReflectionAttribute<T>>}> $definitions */
         $definitions = [];
-        $className = $reflector->getName();
-        self::appendMetadataDefinitions($definitions, $className, $reflector, $name);
+        [$className, $reflector, $classDefinitions] = self::deepClassDefinitions($reflector, $name);
+        if ($classDefinitions !== null) {
+            $definitions[] = [$className, $classDefinitions];
+        }
 
         foreach ($reflector->getMethods() as $method) {
             self::appendMetadataDefinitions($definitions, $className . '::' . $method->getName() . '()', $method, $name);
@@ -233,9 +235,9 @@ final class Reflection
      */
     public static function getFirstDeepMetadata(ReflectionClass $reflector, string $name): ?object
     {
-        $attribute = self::getFirstMetadata($reflector, $name);
-        if ($attribute !== null) {
-            return $attribute;
+        [, $reflector, $classDefinitions] = self::deepClassDefinitions($reflector, $name);
+        if ($classDefinitions !== null) {
+            return $classDefinitions[0]->newInstance();
         }
 
         foreach ($reflector->getMethods() as $method) {
@@ -275,7 +277,8 @@ final class Reflection
      */
     public static function hasDeepMetadata(ReflectionClass $reflector, string $name): bool
     {
-        if (self::hasMetadata($reflector, $name)) {
+        [, $reflector, $classDefinitions] = self::deepClassDefinitions($reflector, $name);
+        if ($classDefinitions !== null) {
             return true;
         }
 
@@ -314,6 +317,26 @@ final class Reflection
         self::$closures = null;
         self::$objects = null;
         self::$metadata = null;
+    }
+
+    /**
+     * @template T of object
+     * @param ReflectionClass<object> $reflector
+     * @param class-string<T>|null $name
+     * @return array{class-string, ReflectionClass<object>, list<ReflectionAttribute<T>>|null}
+     */
+    private static function deepClassDefinitions(ReflectionClass $reflector, ?string $name): array
+    {
+        $className = $reflector->getName();
+        $definitions = self::metadataDefinitions($reflector, $name);
+        // Custom attribute readers may retarget the borrowed reflector during a read.
+        if ($reflector->getName() !== $className) {
+            $reflector = new ReflectionClass($className);
+            $definitions = self::metadataDefinitions($reflector, $name);
+        }
+
+        /** @var list<ReflectionAttribute<T>>|null $definitions */
+        return [$className, $reflector, $definitions];
     }
 
     /**

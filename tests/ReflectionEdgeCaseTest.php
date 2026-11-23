@@ -45,6 +45,33 @@ final class RetargetedDeclaration
     public function replacement(): void {}
 }
 
+/** @extends ReflectionClass<object> */
+final class AttributeReadRetargetingClass extends ReflectionClass
+{
+    private bool $firstRead = true;
+
+    /**
+     * @param class-string $class
+     * @param class-string $replacement
+     */
+    public function __construct(string $class, private readonly string $replacement, private readonly bool $beforeRead)
+    {
+        parent::__construct($class);
+    }
+
+    /** @return list<\ReflectionAttribute<object>> */
+    public function getAttributes(?string $name = null, int $flags = 0): array
+    {
+        if (!$this->firstRead) {
+            return parent::getAttributes($name, $flags);
+        }
+        $this->firstRead = false;
+        $definitions = $this->beforeRead ? [] : parent::getAttributes($name, $flags);
+        parent::__construct($this->replacement);
+        return $this->beforeRead ? parent::getAttributes($name, $flags) : $definitions;
+    }
+}
+
 interface EdgeInterface {}
 trait EdgeTrait {}
 enum EdgeEnum { case Value; }
@@ -194,6 +221,46 @@ test('deep metadata uses one declaration if an attribute retargets the reflector
     ])->and(array_map(static fn (array $attributes): string => $attributes[0]->value, $next))->toBe([
         RetargetedDeclaration::class . '::replacement()' => 'replacement method',
     ]);
+});
+
+test('deep metadata retains the selected class when reading its attributes retargets the reflector', function (bool $beforeRead): void {
+    $reflector = new AttributeReadRetargetingClass(OriginalDeclaration::class, RetargetedDeclaration::class, $beforeRead);
+    $metadata = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+    $next = Reflection::getDeepMetadata($reflector, RetargetingMetadata::class);
+
+    expect(array_map(static fn (array $attributes): string => $attributes[0]->value, $metadata))->toBe([
+        OriginalDeclaration::class => 'original class',
+        OriginalDeclaration::class . '::original()' => 'original method',
+    ])->and(array_map(static fn (array $attributes): string => $attributes[0]->value, $next))->toBe([
+        RetargetedDeclaration::class . '::replacement()' => 'replacement method',
+    ]);
+})->with(['before reading attributes' => true, 'after reading attributes' => false]);
+
+test('short deep metadata queries use the selected class through an attribute read', function (bool $beforeRead): void {
+    $first = new AttributeReadRetargetingClass(RetargetedDeclaration::class, OriginalDeclaration::class, $beforeRead);
+    $has = new AttributeReadRetargetingClass(EdgeAnnotatedClass::class, RetargetedDeclaration::class, $beforeRead);
+
+    expect(Reflection::getFirstDeepMetadata($first, RetargetingMetadata::class)?->value)->toBe('replacement method')
+        ->and(Reflection::hasDeepMetadata($has, RetargetingMetadata::class))->toBeFalse()
+        ->and(Reflection::getFirstDeepMetadata($first, RetargetingMetadata::class)?->value)->toBe('original class')
+        ->and(Reflection::hasDeepMetadata($has, RetargetingMetadata::class))->toBeTrue();
+})->with(['before reading attributes' => true, 'after reading attributes' => false]);
+
+test('short deep metadata queries keep custom class metadata and skip member lookup on a match', function (): void {
+    $reflector = new class (RetargetedDeclaration::class) extends ReflectionClass {
+        public function getAttributes(?string $name = null, int $flags = 0): array
+        {
+            return new ReflectionClass(OriginalDeclaration::class)->getAttributes($name, $flags);
+        }
+
+        public function getMethods(?int $filter = null): array
+        {
+            throw new \LogicException('A class match completes this lookup.');
+        }
+    };
+
+    expect(Reflection::getFirstDeepMetadata($reflector, RetargetingMetadata::class)?->value)->toBe('original class')
+        ->and(Reflection::hasDeepMetadata($reflector, RetargetingMetadata::class))->toBeTrue();
 });
 
 test('ReflectionConstant metadata is safe across supported PHP versions', function (): void {
