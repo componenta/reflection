@@ -21,9 +21,13 @@ $method = Reflection::callable([App\Service\UserService::class, 'handle']);
 
 `Reflection::class()` supports classes, interfaces, traits and enums and returns `null` when the symbol does not exist.
 
-`Reflection::callable()` supports functions, closures, concrete methods and invokable objects. Callables resolved only through `__call()` or `__callStatic()` are rejected because they have no concrete method signature to reflect.
+`Reflection::callable()` supports functions, closures, concrete methods and invokable objects. It rejects callables resolved only through `__call()` or `__callStatic()` when PHP exposes no concrete signature, including the internal closures returned by `Closure::fromCallable()` for such methods.
+
+Qualified ancestor callables return a `ReflectionFunction` for the native capture, retaining PHP's selected declaration and called class.
 
 `Reflection::reflect()` accepts mixed input and returns the corresponding native reflector or `null` when the value cannot be reflected reliably.
+
+Both methods select the owner and method of a callable array before validation can autoload application code. An abstract static dispatch route has no concrete reflector, so `reflect()` returns `null`.
 
 ## Attributes
 
@@ -35,7 +39,7 @@ $first = Reflection::getFirstMetadata($class, PermissionPolicy::class);
 $has = Reflection::hasMetadata($class, PermissionPolicy::class);
 ```
 
-Attribute definitions are cached, while attribute instances are created fresh for each read. `hasMetadata()` does not instantiate attributes.
+Attribute definitions are cached for reflectors supplied by this library. For a caller-supplied reflector, metadata follows its current declaration. Attribute instances are created fresh for each read. `hasMetadata()` does not instantiate attributes.
 
 Supported reflectors include functions, methods, classes, parameters, properties, class constants and global constants. Global constant attributes are available on PHP 8.5+.
 
@@ -56,6 +60,8 @@ App\Command\CreatePostCommand::STATUS
 ```
 
 Use `getFirstDeepMetadata()` for the first matching attribute and `hasDeepMetadata()` for an existence check without instantiating attributes.
+
+`getDeepMetadata()` collects the matching declarations before running attribute constructors.
 
 ## Reflection types
 
@@ -92,9 +98,14 @@ if (ReflectionType::canCoerce($type, $value)) {
 }
 ```
 
-Coercion is limited to reflected PHP types. Union coercion succeeds only when the value already matches a branch or exactly one branch is coercible; ambiguous conversions are rejected.
+Coercion is limited to reflected PHP types. Union coercion succeeds only when the value already matches a branch or exactly one branch is coercible. Ambiguous conversions are rejected. Union checks accept a matching ordinary member before trying callable resolution.
+
+When checking a callable array, type inspection selects its owner and method before resolving the callable. Coercion through the `callable` branch returns this validated pair.
+
+Integer coercion truncates finite values toward zero after checking the platform integer range. Decimal and scientific strings are checked and converted without rounding through a float.
 
 Arrays can be produced from arrays, iterables and `Componenta\Arrayable\Arrayable` values. Scalars are not wrapped into one-element arrays.
+`canCoerce()` checks iterable eligibility before iteration begins. `coerce()` uses PHP's array key rules and reports invalid keys with `InvalidArgumentException`.
 
 ## Cache management
 
@@ -102,7 +113,8 @@ Arrays can be produced from arrays, iterables and `Componenta\Arrayable\Arrayabl
 Reflection::clearReflectors();
 ```
 
-Class, function and method reflectors are cached strongly. Object and closure reflectors use `WeakMap` and do not extend application object lifetime.
+Class, function and method reflectors are cached strongly. Object and closure reflectors are cached weakly and reused while a caller holds the reflector. The cache itself adds no strong reference to the reflector or its subject.
+Cached handles are subclasses of the native reflector types. Calling `__construct()` again on a cached handle throws `LogicException`.
 
 ## Development
 

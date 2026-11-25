@@ -6,6 +6,7 @@ namespace Componenta\Reflection\Tests;
 
 use Attribute;
 use Componenta\Reflection\Reflection;
+use LogicException;
 use ReflectionClass;
 use ReflectionFunction;
 use ReflectionMethod;
@@ -95,6 +96,43 @@ test('caches class function method closure and object reflectors independently',
         ->and(Reflection::object($object))->toBe(Reflection::object($object));
 });
 
+test('shared reflector handles keep the originally selected declaration', function (): void {
+    $class = Reflection::class(AnnotatedClass::class);
+    $method = Reflection::callable([AnnotatedClass::class, 'staticMethod']);
+    $name = __NAMESPACE__ . '\\sharedFunction';
+    $function = Reflection::callable($name);
+    $object = new AnnotatedClass();
+    $objectReflection = Reflection::object($object);
+    $closure = static fn (): string => 'original';
+    $closureReflection = Reflection::callable($closure);
+    if ($class === null || !$method instanceof ReflectionMethod || !$function instanceof ReflectionFunction || !$closureReflection instanceof ReflectionFunction) {
+        throw new LogicException('Expected native reflector types for the original subjects.');
+    }
+
+    expect(fn () => $class->__construct(PlainClass::class))->toThrow(LogicException::class)
+        ->and(fn () => $method->__construct(AnnotatedClass::class, 'annotatedMethod'))->toThrow(LogicException::class)
+        ->and(fn () => $function->__construct('strlen'))->toThrow(LogicException::class)
+        ->and(fn () => $objectReflection->__construct(new PlainClass()))->toThrow(LogicException::class)
+        ->and(fn () => $closureReflection->__construct(static fn (): string => 'other'))->toThrow(LogicException::class);
+
+    expect(Reflection::class(AnnotatedClass::class))->toBe($class)
+        ->and($class->getName())->toBe(AnnotatedClass::class)
+        ->and($method->getName())->toBe('staticMethod')
+        ->and($function->getName())->toBe($name)
+        ->and($objectReflection->getName())->toBe(AnnotatedClass::class)
+        ->and($closureReflection->invoke())->toBe('original');
+});
+
+test('metadata follows the current declaration of a caller owned reflector', function (): void {
+    $reflection = new ReflectionClass(AnnotatedClass::class);
+    expect(Reflection::getFirstMetadata($reflection, TestAttribute::class))->toBeInstanceOf(TestAttribute::class);
+
+    $reflection->__construct(PlainClass::class);
+
+    expect(Reflection::getMetadata($reflection, TestAttribute::class))->toBeNull()
+        ->and(Reflection::hasMetadata($reflection, TestAttribute::class))->toBeFalse();
+});
+
 test('closure callable and object reflection cannot poison each other', function (): void {
     $closure = static function (): void {};
 
@@ -125,19 +163,29 @@ test('invokable callable reflection does not collide with class reflection', fun
 });
 
 test('object and closure caches do not keep user objects alive', function (): void {
-    $object = new PlainClass();
-    $closure = static function (): void {};
-    $objectReference = WeakReference::create($object);
-    $closureReference = WeakReference::create($closure);
+    $gcEnabled = gc_enabled();
+    gc_disable();
+    try {
+        $object = new PlainClass();
+        $capture = new PlainClass();
+        $closure = static fn (): PlainClass => $capture;
+        $objectReference = WeakReference::create($object);
+        $closureReference = WeakReference::create($closure);
+        $captureReference = WeakReference::create($capture);
 
-    Reflection::object($object);
-    Reflection::callable($closure);
+        Reflection::object($object);
+        Reflection::callable($closure);
 
-    unset($object, $closure);
-    gc_collect_cycles();
+        unset($object, $closure, $capture);
 
-    expect($objectReference->get())->toBeNull()
-        ->and($closureReference->get())->toBeNull();
+        expect($objectReference->get())->toBeNull()
+            ->and($closureReference->get())->toBeNull()
+            ->and($captureReference->get())->toBeNull();
+    } finally {
+        if ($gcEnabled) {
+            gc_enable();
+        }
+    }
 });
 
 test('missing classes return null but autoloader failures propagate', function (): void {

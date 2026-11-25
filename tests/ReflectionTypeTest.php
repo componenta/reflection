@@ -11,6 +11,7 @@ use ReflectionClass;
 use ReflectionFunction;
 use ReflectionMethod;
 use ReflectionType as NativeReflectionType;
+use RuntimeException;
 use Stringable;
 
 function parameterType(callable $callable, string $parameter = 'value'): NativeReflectionType
@@ -74,6 +75,30 @@ test('matches unions and intersections', function (): void {
         ->and(ReflectionType::match($intersection, new BothTypes(), strict: true))->toBeTrue()
         ->and(ReflectionType::match($intersection, new FirstOnly(), strict: true))->toBeFalse();
 });
+
+test('a matching array or string union member avoids resolving a callable', function (bool $array): void {
+    $target = $array
+        ? static fn (callable|array $value): mixed => $value
+        : static fn (callable|string $value): mixed => $value;
+    $class = __NAMESPACE__ . '\\DeferredCallableUnionMember';
+    $input = $array ? [$class, 'render'] : $class . '::render';
+    $type = parameterType($target);
+    $autoload = static function (string $name) use ($class): void {
+        if ($name === $class) {
+            throw new RuntimeException('This argument satisfies a union member without loading the callable.');
+        }
+    };
+    spl_autoload_register($autoload);
+
+    try {
+        expect($target($input))->toBe($input)
+            ->and(ReflectionType::match($type, $input, strict: true))->toBeTrue()
+            ->and(ReflectionType::canCoerce($type, $input))->toBeTrue()
+            ->and(ReflectionType::coerce($type, $input))->toBe($input);
+    } finally {
+        spl_autoload_unregister($autoload);
+    }
+})->with(['array' => true, 'string' => false]);
 
 test('flattens and matches DNF types recursively', function (): void {
     $type = parameterType(static fn ((FirstType&SecondType)|ThirdType $value) => null);
